@@ -6,8 +6,7 @@
  *
  * The token vocabulary follows the UZON lexical structure (§2) and keyword
  * list (§2.5). Composite operators such as "or else" and "is not" are
- * recognised as single tokens so the parser never needs two-token lookahead
- * (§9, lexer rules).
+ * recognised as single tokens so the parser never needs two-token lookahead.
  */
 
 // ── Token type enum ────────────────────────────────────────────────
@@ -24,7 +23,7 @@ export enum TokenType {
   Nan,
   Undefined,
 
-  // Identifier (§2.3)
+  // Identifier
   Identifier,
 
   // Binding (§5.1)
@@ -71,15 +70,11 @@ export enum TokenType {
   Returns,
   Default,
 
-  // Reserved (§2.5)
-  Lazy,
-  Type,
-
-  // Composite operators (§9 lexer rules)
+  // Composite operators — recognised as single tokens (§9 lexer rules)
+  OrElse,      // "or else"
   IsNot,       // "is not"
   IsNamed,     // "is named"
   IsNotNamed,  // "is not named"
-  OrElse,      // "or else"
 
   // Arithmetic (§5.3)
   Plus,     // +
@@ -88,99 +83,105 @@ export enum TokenType {
   Slash,    // /
   Percent,  // %
   Caret,    // ^
+  PlusPlus, // ++ concatenation (§5.8.2)
+  StarStar, // ** repetition (§5.8.3)
 
   // Comparison (§5.4)
-  Lt,    // <
-  LtEq,  // <=
-  Gt,    // >
-  GtEq,  // >=
+  Lt,  // <
+  Le,  // <=
+  Gt,  // >
+  Ge,  // >=
 
-  // Collection (§5.8)
-  PlusPlus,  // ++ concatenation
-  StarStar,  // ** repetition
+  // Punctuation
+  Comma,  // ,
+  Dot,    // .
+  At,     // @ keyword escape (§2.4)
 
-  // Delimiters (§2.6)
+  // Delimiters
   LBrace,    // {
   RBrace,    // }
-  LParen,    // (
-  RParen,    // )
   LBracket,  // [
   RBracket,  // ]
-  Comma,     // ,
-  Dot,       // .
+  LParen,    // (
+  RParen,    // )
 
-  // Keyword escape (§2.4)
-  At,  // @
-
-  // End of file
+  // Structural
+  Newline,
   Eof,
 }
 
-// ── Token structure ────────────────────────────────────────────────
+// ── Token interface ────────────────────────────────────────────────
 
 export interface Token {
   type: TokenType;
   value: string;
   line: number;
   col: number;
+  /** True on Newline tokens that follow a comment on the preceding line. */
+  afterComment?: boolean;
 }
 
-// ── Keyword map ────────────────────────────────────────────────────
+// ── Keyword map (§2.5) ────────────────────────────────────────────
 
-export const KEYWORDS: ReadonlyMap<string, TokenType> = new Map([
-  ["true", TokenType.True],
-  ["false", TokenType.False],
-  ["null", TokenType.Null],
-  ["inf", TokenType.Inf],
-  ["nan", TokenType.Nan],
-  ["undefined", TokenType.Undefined],
-  ["is", TokenType.Is],
-  ["are", TokenType.Are],
-  ["from", TokenType.From],
-  ["called", TokenType.Called],
-  ["as", TokenType.As],
-  ["named", TokenType.Named],
-  ["with", TokenType.With],
-  ["union", TokenType.Union],
-  ["extends", TokenType.Extends],
-  ["to", TokenType.To],
-  ["of", TokenType.Of],
-  ["and", TokenType.And],
-  ["or", TokenType.Or],
-  ["not", TokenType.Not],
-  ["if", TokenType.If],
-  ["then", TokenType.Then],
-  ["else", TokenType.Else],
-  ["case", TokenType.Case],
-  ["when", TokenType.When],
-  ["self", TokenType.Self],
-  ["env", TokenType.Env],
-  ["struct", TokenType.Struct],
-  ["in", TokenType.In],
-  ["function", TokenType.Function],
-  ["returns", TokenType.Returns],
-  ["default", TokenType.Default],
-  ["lazy", TokenType.Lazy],
-  ["type", TokenType.Type],
+export const KEYWORDS: Record<string, TokenType> = {
+  true: TokenType.True,
+  false: TokenType.False,
+  null: TokenType.Null,
+  inf: TokenType.Inf,
+  nan: TokenType.Nan,
+  undefined: TokenType.Undefined,
+  is: TokenType.Is,
+  are: TokenType.Are,
+  from: TokenType.From,
+  called: TokenType.Called,
+  as: TokenType.As,
+  named: TokenType.Named,
+  with: TokenType.With,
+  union: TokenType.Union,
+  extends: TokenType.Extends,
+  to: TokenType.To,
+  of: TokenType.Of,
+  and: TokenType.And,
+  or: TokenType.Or,
+  not: TokenType.Not,
+  if: TokenType.If,
+  then: TokenType.Then,
+  else: TokenType.Else,
+  case: TokenType.Case,
+  when: TokenType.When,
+  self: TokenType.Self,
+  env: TokenType.Env,
+  struct: TokenType.Struct,
+  in: TokenType.In,
+  function: TokenType.Function,
+  returns: TokenType.Returns,
+  default: TokenType.Default,
+};
+
+/** Reserved words that are not yet keywords (§2.5). */
+export const RESERVED_KEYWORDS = new Set(["lazy", "type"]);
+
+/**
+ * Characters that unconditionally terminate an identifier token (§2.3).
+ */
+export const TOKEN_BOUNDARY_CHARS = new Set([
+  "{", "}", "[", "]", "(", ")", ",", ".", '"', "'", "@",
+  "+", "-", "*", "/", "%", "^", "<", ">", "=", "!",
+  "?", ":", ";", "|", "&", "$", "~", "#", "\\",
 ]);
 
-// ── Token boundary characters (§2.3) ──────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────────
 
-/**
- * Characters that MUST terminate or cannot appear within an unquoted identifier.
- * Whitespace is handled separately.
- */
-export const TOKEN_BOUNDARY_CHARS = new Set(
-  "{}[](),.\"'@+-*/%^<>=!?:;|&$~#\\".split(""),
-);
+/** Token types that can appear as the *last* token of a value expression. */
+const VALUE_TOKEN_TYPES = new Set([
+  TokenType.Integer, TokenType.Float, TokenType.String,
+  TokenType.True, TokenType.False, TokenType.Null,
+  TokenType.Inf, TokenType.Nan, TokenType.Undefined,
+  TokenType.Identifier, TokenType.Self, TokenType.Env,
+  TokenType.RParen, TokenType.RBracket, TokenType.RBrace,
+]);
 
-/**
- * Returns true if `s` represents a keyword token type.
- */
-export function isKeywordType(type: TokenType): boolean {
-  return (
-    type >= TokenType.True &&
-    type <= TokenType.Type &&
-    type !== TokenType.Identifier
-  );
+/** Whether `type` can be the trailing token of a value-producing expression. */
+export function isValueToken(type: TokenType): boolean {
+  return VALUE_TOKEN_TYPES.has(type);
 }

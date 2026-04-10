@@ -13,7 +13,7 @@ export {
   UzonCircularError,
 } from "./error.js";
 
-export { TokenType } from "./token.js";
+export { TokenType, isValueToken } from "./token.js";
 export type { Token } from "./token.js";
 
 export {
