@@ -87,19 +87,15 @@ export class UzonTuple {
 
 // ── Function (§3.8) ───────────────────────────────────────────────
 
-/** Parameter definition for a UZON function. */
-export interface UzonParam {
-  name: string;
-  type: string;
-  defaultValue?: unknown;
-}
-
 /** A function value — pure, non-recursive, first-class. */
 export class UzonFunction {
   constructor(
-    public readonly params: readonly UzonParam[],
+    public readonly paramNames: readonly string[],
+    public readonly paramTypes: readonly string[],
+    public readonly defaultValues: readonly (UzonValue | null)[],
     public readonly returnType: string,
     public readonly body: unknown,
+    public readonly finalExpr: unknown,
     public readonly closureScope: unknown,
     public readonly typeName: string | null = null,
   ) {}
