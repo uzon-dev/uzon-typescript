@@ -17,6 +17,9 @@ import { join, relative } from "node:path";
 import { Lexer } from "../src/lexer.js";
 import { Parser } from "../src/parser.js";
 import { Evaluator } from "../src/evaluator.js";
+import { stringify } from "../src/stringify.js";
+import type { UzonValue } from "../src/value.js";
+import { valuesEqual } from "../src/eval-helpers.js";
 
 const CONFORMANCE_DIR = join(__dirname, "../../conformance");
 
@@ -70,6 +73,45 @@ describe("conformance: invalid", () => {
     it(label, () => {
       const src = readFileSync(filePath, "utf-8");
       expect(() => parseAndEval(src)).toThrow();
+    });
+  }
+});
+
+// ── Eval conformance tests ──────────────────────────────────────
+// Each .uzon file is evaluated and compared against its .expected.uzon
+
+const evalDir = join(CONFORMANCE_DIR, "eval");
+const evalInputFiles = collectUzonFilesRecursive(evalDir)
+  .filter(f => !f.endsWith(".expected.uzon"));
+
+describe("conformance: eval", () => {
+  for (const inputPath of evalInputFiles) {
+    const label = relative(evalDir, inputPath);
+    const expectedPath = inputPath.replace(/\.uzon$/, ".expected.uzon");
+
+    it(label, () => {
+      const inputSrc = readFileSync(inputPath, "utf-8");
+      const expectedSrc = readFileSync(expectedPath, "utf-8");
+
+      const actual = parseAndEval(inputSrc, inputPath);
+      const expected = parseAndEval(expectedSrc, expectedPath);
+
+      // Compare each binding from the expected result
+      for (const key of Object.keys(expected)) {
+        const act = actual[key];
+        const exp = expected[key];
+        // NaN === NaN should be true for conformance purposes (unlike IEEE 754)
+        const nanMatch = typeof act === "number" && typeof exp === "number"
+          && Number.isNaN(act) && Number.isNaN(exp);
+        if (!nanMatch && !valuesEqual(act, exp)) {
+          // Produce readable diff via stringify
+          const actStr = act !== undefined ? stringify({ [key]: act }) : `${key} is <missing>`;
+          const expStr = stringify({ [key]: exp });
+          expect.fail(
+            `Binding '${key}' mismatch:\n  actual:   ${actStr}\n  expected: ${expStr}`,
+          );
+        }
+      }
     });
   }
 });
