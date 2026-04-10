@@ -40,7 +40,8 @@ import {
   actualType, isAdoptable,
 } from "./eval-numeric.js";
 import { evalBinaryOp, evalUnaryOp, evalIn as evalInImpl } from "./eval-operators.js";
-import { evalTypeAnnotation, evalConversion } from "./eval-types.js";
+import { evalTypeAnnotation } from "./eval-type-annotation.js";
+import { evalConversion } from "./eval-type-conversion.js";
 import {
   evalFunctionExpr, evalFunctionCall, callFunctionDirect as callFunctionDirectImpl,
 } from "./eval-functions.js";
@@ -144,7 +145,15 @@ export class Evaluator implements EvalContext {
     bindings: BindingNode[], scope: Scope, allowSelfExclusion = false,
     locals?: Map<string, UzonValue>,
   ): void {
-    // 1. Build dependency graph
+    const { bindingMap, order } = this.resolveBindingOrder(bindings, allowSelfExclusion);
+    this.validateBindings(bindings);
+    this.evaluateInOrder(order, bindingMap, scope, locals);
+  }
+
+  /** Step 1+2: Build dependency graph + topological sort. */
+  private resolveBindingOrder(
+    bindings: BindingNode[], allowSelfExclusion: boolean,
+  ): { bindingMap: Map<string, BindingNode>; order: string[] } {
     const deps = new Map<string, Set<string>>();
     const bindingMap = new Map<string, BindingNode>();
     const names = new Set<string>();
@@ -152,7 +161,6 @@ export class Evaluator implements EvalContext {
 
     for (const b of bindings) {
       if (names.has(b.name)) {
-        // §3.8: Duplicate names allowed for function or field extraction (of)
         if (!allowSelfExclusion
             || (b.value.kind !== "FunctionExpr" && b.value.kind !== "FieldExtraction")) {
           throw new UzonSyntaxError(`Duplicate binding '${b.name}'`, b.line, b.col);
@@ -163,33 +171,30 @@ export class Evaluator implements EvalContext {
       bindingMap.set(b.name, b);
     }
 
-    // Collect deps (second pass so all names known for forward refs)
     for (const b of bindings) {
       const d = collectDeps(b.value, names);
-      // §3.8: Detect direct function recursion
       if (d.has(b.name) && b.value.kind === "FunctionExpr" && !hasPriorBinding.has(b.name)) {
         throw new UzonTypeError(
           `Direct recursion detected: '${b.name}' references itself — the call graph must be a DAG`,
           b.line, b.col,
         );
       }
-      d.delete(b.name); // self-exclusion
+      d.delete(b.name);
       deps.set(b.name, d);
     }
 
-    // 2. Topological sort
-    const order = topoSort(deps, bindings);
+    return { bindingMap, order: topoSort(deps, bindings) };
+  }
 
-    // 3. Validate bindings before evaluation
+  /** Step 3: Pre-evaluation validation of bindings. */
+  private validateBindings(bindings: BindingNode[]): void {
     for (const b of bindings) {
-      // §3.1: Cannot assign literal undefined
       if (b.value.kind === "UndefinedLiteral") {
         throw new UzonSyntaxError(
           `Cannot assign literal 'undefined' to '${b.name}' — undefined is a state, not a value`,
           b.value.line, b.value.col,
         );
       }
-      // §3.4: Empty list requires type annotation
       if (b.value.kind === "ListLiteral"
           && (b.value as { elements: AstNode[] }).elements.length === 0) {
         throw new UzonTypeError(
@@ -197,7 +202,6 @@ export class Evaluator implements EvalContext {
           b.value.line, b.value.col,
         );
       }
-      // §3.4: All-null list requires type annotation
       if (b.value.kind === "ListLiteral") {
         const elems = (b.value as { elements: AstNode[] }).elements;
         if (elems.length > 0 && elems.every(e => e.kind === "NullLiteral")) {
@@ -208,65 +212,86 @@ export class Evaluator implements EvalContext {
         }
       }
     }
+  }
 
-    // 4. Evaluate in dependency order
+  /** Step 4: Evaluate bindings in dependency order. */
+  private evaluateInOrder(
+    order: string[], bindingMap: Map<string, BindingNode>,
+    scope: Scope, locals?: Map<string, UzonValue>,
+  ): void {
     for (const name of order) {
       const b = bindingMap.get(name)!;
       let val = this.evalNode(b.value, scope, name);
 
-      // Set typeName on enum/union/tagged-union/function when called is present
       if (b.calledName) {
-        if (val instanceof UzonEnum && val.typeName === null) {
-          val = new UzonEnum(val.value, val.variants, b.calledName);
-        } else if (val instanceof UzonUnion && val.typeName === null) {
-          val = new UzonUnion(val.value, val.types, b.calledName);
-        } else if (val instanceof UzonTaggedUnion && val.typeName === null) {
-          val = new UzonTaggedUnion(val.value, val.tag, val.variants, b.calledName);
-        } else if (val instanceof UzonFunction && val.typeName === null) {
-          val = new UzonFunction(
-            val.paramNames, val.paramTypes, val.defaultValues,
-            val.returnType, val.body, val.finalExpr, val.closureScope, b.calledName,
-          );
-        } else if (val !== null && typeof val === "object" && !Array.isArray(val)
-            && !(val instanceof UzonTuple)) {
-          this.structTypeNames.set(val as Record<string, UzonValue>, b.calledName);
-        }
+        val = this.applyCalledName(val, b.calledName);
       }
 
       scope.set(name, val);
       if (locals && val !== UZON_UNDEFINED) locals.set(name, val);
 
-      // §5: Store numeric type for the binding
-      if (this.numericType && (typeof val === "bigint" || typeof val === "number")) {
-        const concreteType = actualType(this.numericType)!;
-        if (isAdoptable(this.numericType)) {
-          if (typeof val === "bigint") validateIntegerType(val, concreteType, b.value);
-          else if (typeof val === "number") validateFloatType(val, concreteType, b.value);
-        }
-        scope.setNumericType(name, concreteType);
-      }
+      this.storeNumericType(val, b, scope);
 
-      // Register type if called
       if (b.calledName) {
         this.registerType(b.calledName, b.value, val, scope);
       }
 
-      // Register child scope for struct bindings (type path resolution)
-      if (val !== null && typeof val === "object" && !Array.isArray(val)
-          && !(val instanceof UzonEnum) && !(val instanceof UzonUnion)
-          && !(val instanceof UzonTaggedUnion) && !(val instanceof UzonTuple)
-          && !(val instanceof UzonFunction) && (val as any) !== UZON_UNDEFINED) {
-        const existing = this.structScopes.get(val as Record<string, UzonValue>)
-          ?? this.getImportScope(val as Record<string, UzonValue>);
-        if (existing) {
-          scope.setChildScope(name, existing);
-        } else {
-          const childScope = new Scope(scope);
-          for (const [k, v] of Object.entries(val)) {
-            childScope.set(k, v);
-          }
-          scope.setChildScope(name, childScope);
+      this.registerStructScope(val, name, scope);
+    }
+  }
+
+  /** Attach a `called` type name to a value. */
+  private applyCalledName(val: UzonValue, calledName: string): UzonValue {
+    if (val instanceof UzonEnum && val.typeName === null) {
+      return new UzonEnum(val.value, val.variants, calledName);
+    }
+    if (val instanceof UzonUnion && val.typeName === null) {
+      return new UzonUnion(val.value, val.types, calledName);
+    }
+    if (val instanceof UzonTaggedUnion && val.typeName === null) {
+      return new UzonTaggedUnion(val.value, val.tag, val.variants, calledName);
+    }
+    if (val instanceof UzonFunction && val.typeName === null) {
+      return new UzonFunction(
+        val.paramNames, val.paramTypes, val.defaultValues,
+        val.returnType, val.body, val.finalExpr, val.closureScope, calledName,
+      );
+    }
+    if (val !== null && typeof val === "object" && !Array.isArray(val)
+        && !(val instanceof UzonTuple)) {
+      this.structTypeNames.set(val as Record<string, UzonValue>, calledName);
+    }
+    return val;
+  }
+
+  /** Store resolved numeric type for a binding. */
+  private storeNumericType(val: UzonValue, b: BindingNode, scope: Scope): void {
+    if (this.numericType && (typeof val === "bigint" || typeof val === "number")) {
+      const concreteType = actualType(this.numericType)!;
+      if (isAdoptable(this.numericType)) {
+        if (typeof val === "bigint") validateIntegerType(val, concreteType, b.value);
+        else if (typeof val === "number") validateFloatType(val, concreteType, b.value);
+      }
+      scope.setNumericType(b.name, concreteType);
+    }
+  }
+
+  /** Register child scope for struct bindings (type path resolution). */
+  private registerStructScope(val: UzonValue, name: string, scope: Scope): void {
+    if (val !== null && typeof val === "object" && !Array.isArray(val)
+        && !(val instanceof UzonEnum) && !(val instanceof UzonUnion)
+        && !(val instanceof UzonTaggedUnion) && !(val instanceof UzonTuple)
+        && !(val instanceof UzonFunction) && (val as any) !== UZON_UNDEFINED) {
+      const existing = this.structScopes.get(val as Record<string, UzonValue>)
+        ?? this.getImportScope(val as Record<string, UzonValue>);
+      if (existing) {
+        scope.setChildScope(name, existing);
+      } else {
+        const childScope = new Scope(scope);
+        for (const [k, v] of Object.entries(val)) {
+          childScope.set(k, v);
         }
+        scope.setChildScope(name, childScope);
       }
     }
   }

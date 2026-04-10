@@ -29,16 +29,23 @@
 import { TokenType, Token } from "./token.js";
 import { UzonSyntaxError } from "./error.js";
 import type {
-  AstNode, BindingNode, DocumentNode, StructLiteralNode, ListLiteralNode,
-  TupleLiteralNode, GroupingNode, IfExprNode, CaseExprNode, WhenClause,
-  TypeExprNode, StringPart, BinaryOp, FunctionParam,
+  AstNode, BindingNode, DocumentNode,
+  TypeExprNode, BinaryOp,
 } from "./ast.js";
+import type { ParseContext } from "./parse-context.js";
 
-export class Parser {
-  private tokens: Token[];
-  private pos = 0;
-  /** Suppress multiline string continuation inside function body bindings. */
-  private suppressMultilineString = false;
+// ── Extracted modules ──
+import { parseStringLiteral } from "./parse-strings.js";
+import { parseFunctionExpr } from "./parse-functions.js";
+import {
+  parseStructLiteral, parseListLiteral, parseTupleOrGrouping,
+  parseIfExpr, parseCaseExpr, parseStructImport,
+} from "./parse-compounds.js";
+
+export class Parser implements ParseContext {
+  tokens: Token[];
+  pos = 0;
+  suppressMultilineString = false;
 
   constructor(tokens: Token[]) {
     this.tokens = tokens;
@@ -52,7 +59,7 @@ export class Parser {
   // ── Token helpers ──────────────────────────────────────────
 
   /** Peek at the next non-newline token, optionally skipping `skip` tokens. */
-  private peek(skip = 0): Token {
+  peek(skip = 0): Token {
     let i = this.pos;
     let skipped = 0;
     while (i < this.tokens.length) {
@@ -65,26 +72,26 @@ export class Parser {
   }
 
   /** Peek at the raw next token without skipping newlines. */
-  private peekRaw(): Token {
+  peekRaw(): Token {
     return this.tokens[this.pos] ?? this.tokens[this.tokens.length - 1];
   }
 
   /** Consume and return the next non-newline token. */
-  private advance(): Token {
+  advance(): Token {
     this.skipNewlines();
     const tok = this.tokens[this.pos];
     this.pos++;
     return tok;
   }
 
-  private skipNewlines() {
+  skipNewlines() {
     while (this.pos < this.tokens.length && this.tokens[this.pos].type === TokenType.Newline) {
       this.pos++;
     }
   }
 
   /** Consume and return a token of the expected type, or throw. */
-  private expect(type: TokenType, what?: string): Token {
+  expect(type: TokenType, what?: string): Token {
     this.skipNewlines();
     const tok = this.advance();
     if (tok.type !== type) {
@@ -93,14 +100,14 @@ export class Parser {
     return tok;
   }
 
-  private error(msg: string, tok?: Token): never {
+  error(msg: string, tok?: Token): never {
     const t = tok ?? this.peek();
     throw new UzonSyntaxError(msg, t.line, t.col);
   }
 
   // ── Bindings (§5.1) ───────────────────────────────────────
 
-  private parseBindings(until: TokenType): BindingNode[] {
+  parseBindings(until: TokenType): BindingNode[] {
     const bindings: BindingNode[] = [];
     this.skipNewlines();
 
@@ -125,7 +132,6 @@ export class Parser {
     const isTok = this.peek();
 
     // Handle composite operators at binding position (§9 binding decomposition).
-    // "x is not true" → binding x = (not true)
     if (isTok.type === TokenType.IsNot) {
       this.advance();
       this.tokens.splice(this.pos, 0, {
@@ -228,7 +234,7 @@ export class Parser {
    * Lookahead: does comma + identifier + is/are follow?
    * Used to terminate `are`, enum variants, and union types at binding boundaries (§3.5).
    */
-  private isCommaFollowedByBinding(): boolean {
+  isCommaFollowedByBinding(): boolean {
     let i = this.pos + 1; // after comma
     while (i < this.tokens.length && this.tokens[i].type === TokenType.Newline) i++;
     if (i >= this.tokens.length) return false;
@@ -241,7 +247,7 @@ export class Parser {
   }
 
   /** §6.2: `called TypeName` — names the type of a binding. */
-  private tryParseCalled(): string | null {
+  tryParseCalled(): string | null {
     this.skipNewlines();
     if (this.peek().type === TokenType.Called) {
       this.advance();
@@ -253,7 +259,7 @@ export class Parser {
 
   // ── Expression parsing (precedence climbing) ──────────────
 
-  private parseExpression(): AstNode {
+  parseExpression(): AstNode {
     return this.parseOrElse();
   }
 
@@ -486,7 +492,7 @@ export class Parser {
   }
 
   /** Read a variant name — identifiers and keywords are both valid (§3.5). */
-  private parseVariantName(): string {
+  parseVariantName(): string {
     this.skipNewlines();
     const tok = this.advance();
     if (tok.type === TokenType.Identifier) return tok.value;
@@ -543,14 +549,14 @@ export class Parser {
 
     if (this.peek().type === TokenType.With) {
       const withTok = this.advance();
-      const overrides = this.parseStructLiteral();
+      const overrides = parseStructLiteral(this);
       expr = { kind: "StructOverride", base: expr, overrides, line: withTok.line, col: withTok.col };
       if (this.peek().type === TokenType.With || this.peek().type === TokenType.Extends) {
         this.error("Chaining 'with'/'extends' is not permitted — use an intermediate binding", this.peek());
       }
     } else if (this.peek().type === TokenType.Extends) {
       const extTok = this.advance();
-      const extensions = this.parseStructLiteral();
+      const extensions = parseStructLiteral(this);
       expr = { kind: "StructExtend", base: expr, extensions, line: extTok.line, col: extTok.col };
       if (this.peek().type === TokenType.With || this.peek().type === TokenType.Extends) {
         this.error("Chaining 'with'/'extends' is not permitted — use an intermediate binding", this.peek());
@@ -658,7 +664,7 @@ export class Parser {
         this.advance();
         return { kind: "UndefinedLiteral", line: tok.line, col: tok.col };
       case TokenType.String:
-        return this.parseStringLiteral();
+        return parseStringLiteral(this);
       case TokenType.Self:
         this.advance();
         return { kind: "SelfRef", line: tok.line, col: tok.col };
@@ -669,334 +675,27 @@ export class Parser {
         this.advance();
         return { kind: "Identifier", name: tok.value, line: tok.line, col: tok.col };
       case TokenType.LBrace:
-        return this.parseStructLiteral();
+        return parseStructLiteral(this);
       case TokenType.LBracket:
-        return this.parseListLiteral();
+        return parseListLiteral(this);
       case TokenType.LParen:
-        return this.parseTupleOrGrouping();
+        return parseTupleOrGrouping(this);
       case TokenType.If:
-        return this.parseIfExpr();
+        return parseIfExpr(this);
       case TokenType.Case:
-        return this.parseCaseExpr();
+        return parseCaseExpr(this);
       case TokenType.Struct:
-        return this.parseStructImport();
+        return parseStructImport(this);
       case TokenType.Function:
-        return this.parseFunctionExpr();
+        return parseFunctionExpr(this);
       default:
         this.error(`Unexpected token: '${tok.value}' (${TokenType[tok.type]})`, tok);
     }
   }
 
-  // ── Function expression (§3.8) ─────────────────────────────
-
-  private parseFunctionExpr(): AstNode {
-    const funcTok = this.expect(TokenType.Function, "'function'");
-
-    // Parameters — may be empty (zero-arity functions allowed)
-    const params: FunctionParam[] = [];
-    let seenDefault = false;
-
-    this.skipNewlines();
-    if (this.peek().type !== TokenType.Returns) {
-      const firstParam = this.parseFunctionParam();
-      if (firstParam.defaultValue !== null) seenDefault = true;
-      params.push(firstParam);
-
-      while (this.peek().type === TokenType.Comma) {
-        this.advance();
-        this.skipNewlines();
-        if (this.peek().type === TokenType.Returns) break;
-        const param = this.parseFunctionParam();
-        if (param.defaultValue !== null) {
-          seenDefault = true;
-        } else if (seenDefault) {
-          this.error("Required parameter after a defaulted parameter is not allowed", this.peek());
-        }
-        params.push(param);
-      }
-    }
-
-    this.expect(TokenType.Returns, "'returns'");
-    const returnType = this.parseTypeExpr();
-
-    // Body: { [bindings...] finalExpr }
-    this.expect(TokenType.LBrace, "'{'");
-    const { bindings: bodyBindings, finalExpr } = this.parseFunctionBody();
-    this.expect(TokenType.RBrace, "'}'");
-
-    return {
-      kind: "FunctionExpr", params, returnType,
-      body: bodyBindings, finalExpr,
-      line: funcTok.line, col: funcTok.col,
-    };
-  }
-
-  private parseFunctionParam(): FunctionParam {
-    this.skipNewlines();
-    const nameTok = this.advance();
-    if (nameTok.type !== TokenType.Identifier) {
-      this.error("Expected parameter name", nameTok);
-    }
-    this.expect(TokenType.As, "'as' after parameter name");
-    const type = this.parseTypeExpr();
-
-    let defaultValue: AstNode | null = null;
-    if (this.peek().type === TokenType.Default) {
-      this.advance();
-      defaultValue = this.parseExpression();
-    }
-
-    return { name: nameTok.value, type, defaultValue, line: nameTok.line, col: nameTok.col };
-  }
-
-  private parseFunctionBody(): { bindings: BindingNode[]; finalExpr: AstNode } {
-    const bindings: BindingNode[] = [];
-    this.skipNewlines();
-
-    // 2-token lookahead: `identifier is` means binding; otherwise it's the final expression
-    while (this.peek().type !== TokenType.RBrace) {
-      if (this.peek().type === TokenType.Identifier && this.peek(1).type === TokenType.Is) {
-        bindings.push(this.parseFuncBinding());
-        this.skipNewlines();
-        if (this.peek().type === TokenType.Comma) {
-          this.advance();
-          this.skipNewlines();
-        }
-        this.skipNewlines();
-      } else {
-        break;
-      }
-    }
-
-    if (this.peek().type === TokenType.RBrace) {
-      this.error("Function body must have a final expression (return value)");
-    }
-    const finalExpr = this.parseExpression();
-    this.skipNewlines();
-
-    return { bindings, finalExpr };
-  }
-
-  /** Parse a binding inside a function body, suppressing multiline string continuation. */
-  private parseFuncBinding(): BindingNode {
-    this.skipNewlines();
-    const nameTok = this.expect(TokenType.Identifier, "binding name");
-    this.expect(TokenType.Is, "'is'");
-    const prev = this.suppressMultilineString;
-    this.suppressMultilineString = true;
-    const value = this.parseExpression();
-    this.suppressMultilineString = prev;
-    return { kind: "Binding", name: nameTok.value, value, calledName: null, line: nameTok.line, col: nameTok.col };
-  }
-
-  // ── String literal with interpolation and multiline (§4.4) ─
-
-  /** Token types that can start an expression inside interpolation. */
-  private static readonly INTERP_EXPR_START = new Set([
-    TokenType.Identifier, TokenType.Integer, TokenType.Float,
-    TokenType.True, TokenType.False, TokenType.Null, TokenType.Undefined,
-    TokenType.Inf, TokenType.Nan,
-    TokenType.Self, TokenType.Env,
-    TokenType.LParen, TokenType.LBrace, TokenType.LBracket,
-    TokenType.If, TokenType.Case, TokenType.Struct, TokenType.Function,
-    TokenType.Not, TokenType.Minus,
-  ]);
-
-  /** Parse a single string segment (possibly with interpolation). */
-  private parseStringSingleOrInterpolated(): StringPart[] {
-    const parts: StringPart[] = [];
-    const strTok = this.advance(); // String token
-    if (strTok.value) parts.push(strTok.value);
-
-    while (this.pos < this.tokens.length) {
-      const raw = this.peekRaw();
-      if (raw.type === TokenType.String) {
-        const st = this.advance();
-        if (st.value) parts.push(st.value);
-        continue;
-      }
-      if (raw.type === TokenType.Eof || !Parser.INTERP_EXPR_START.has(raw.type)) {
-        break;
-      }
-      // Interpolation expression
-      const expr = this.parseExpression();
-      parts.push(expr);
-    }
-    return parts;
-  }
-
-  /** Parse a full string literal, including multiline continuation (§4.4.2). */
-  private parseStringLiteral(): AstNode {
-    const firstTok = this.tokens[this.pos];
-    const parts = this.parseStringSingleOrInterpolated();
-
-    // §4.4.2: multiline strings — adjacent string on the next physical line
-    while (this.checkMultilineStringContinuation()) {
-      parts.push("\n");
-      this.skipNewlines();
-      parts.push(...this.parseStringSingleOrInterpolated());
-    }
-
-    return { kind: "StringLiteral", parts, line: firstTok.line, col: firstTok.col };
-  }
-
-  /**
-   * §4.4.2: Check whether the next line continues a multiline string.
-   * Requires exactly one newline between strings — blank lines or comments break the sequence.
-   */
-  private checkMultilineStringContinuation(): boolean {
-    if (this.suppressMultilineString) return false;
-    let i = this.pos;
-    if (i >= this.tokens.length) return false;
-    if (this.tokens[i].type !== TokenType.Newline) return false;
-    const nlTok = this.tokens[i];
-    i++;
-    // §4.4.2: comment between multiline string parts is an error
-    if (nlTok.afterComment) {
-      let j = i;
-      while (j < this.tokens.length && this.tokens[j].type === TokenType.Newline) j++;
-      if (j < this.tokens.length && this.tokens[j].type === TokenType.String) {
-        this.error("Comment between multiline string parts is not allowed", this.tokens[j]);
-      }
-      return false;
-    }
-    if (i < this.tokens.length && this.tokens[i].type === TokenType.String) return true;
-    return false;
-  }
-
-  // ── Compound literals ──────────────────────────────────────
-
-  private parseStructLiteral(): StructLiteralNode {
-    const lbrace = this.expect(TokenType.LBrace, "'{'");
-    const fields = this.parseBindings(TokenType.RBrace);
-    this.expect(TokenType.RBrace, "'}'");
-    return { kind: "StructLiteral", fields, line: lbrace.line, col: lbrace.col };
-  }
-
-  private parseListLiteral(): ListLiteralNode {
-    const lbrack = this.expect(TokenType.LBracket, "'['");
-    const elements: AstNode[] = [];
-
-    this.skipNewlines();
-    if (this.peek().type !== TokenType.RBracket) {
-      elements.push(this.parseExpression());
-      while (this.peek().type === TokenType.Comma) {
-        this.advance();
-        this.skipNewlines();
-        if (this.peek().type === TokenType.RBracket) break;
-        elements.push(this.parseExpression());
-      }
-    }
-    this.skipNewlines();
-    this.expect(TokenType.RBracket, "']'");
-    return { kind: "ListLiteral", elements, line: lbrack.line, col: lbrack.col };
-  }
-
-  private parseTupleOrGrouping(): AstNode {
-    const lparen = this.expect(TokenType.LParen, "'('");
-    this.skipNewlines();
-
-    // Empty tuple: ()
-    if (this.peek().type === TokenType.RParen) {
-      this.advance();
-      return { kind: "TupleLiteral", elements: [], line: lparen.line, col: lparen.col } as TupleLiteralNode;
-    }
-
-    const first = this.parseExpression();
-    this.skipNewlines();
-
-    // Grouping: (expr)
-    if (this.peek().type === TokenType.RParen) {
-      this.advance();
-      return { kind: "Grouping", expr: first, line: lparen.line, col: lparen.col } as GroupingNode;
-    }
-
-    // Tuple: (expr, expr, ...) — comma presence means tuple
-    if (this.peek().type === TokenType.Comma) {
-      const elements: AstNode[] = [first];
-      while (this.peek().type === TokenType.Comma) {
-        this.advance();
-        this.skipNewlines();
-        if (this.peek().type === TokenType.RParen) break;
-        elements.push(this.parseExpression());
-        this.skipNewlines();
-      }
-      this.expect(TokenType.RParen, "')'");
-      return { kind: "TupleLiteral", elements, line: lparen.line, col: lparen.col } as TupleLiteralNode;
-    }
-
-    this.error("Expected ',' or ')' in tuple/grouping", this.peek());
-  }
-
-  // ── Control flow ───────────────────────────────────────────
-
-  /** §5.9: if condition then expr else expr */
-  private parseIfExpr(): IfExprNode {
-    const ifTok = this.expect(TokenType.If, "'if'");
-    const condition = this.parseExpression();
-    this.expect(TokenType.Then, "'then'");
-    const thenBranch = this.parseExpression();
-    this.expect(TokenType.Else, "'else'");
-    const elseBranch = this.parseExpression();
-    return { kind: "IfExpr", condition, thenBranch, elseBranch, line: ifTok.line, col: ifTok.col };
-  }
-
-  /** §5.10: case expr when value then expr ... else expr */
-  private parseCaseExpr(): CaseExprNode {
-    const caseTok = this.expect(TokenType.Case, "'case'");
-    const scrutinee = this.parseExpression();
-
-    const whenClauses: WhenClause[] = [];
-    this.skipNewlines();
-    while (this.peek().type === TokenType.When) {
-      const whenTok = this.advance();
-      this.skipNewlines();
-
-      let isNamed = false;
-      let value: AstNode | string;
-
-      if (this.peek().type === TokenType.Named) {
-        this.advance();
-        isNamed = true;
-        value = this.parseVariantName();
-      } else {
-        value = this.parseExpression();
-      }
-
-      this.expect(TokenType.Then, "'then'");
-      const result = this.parseExpression();
-      whenClauses.push({ isNamed, value, result, line: whenTok.line, col: whenTok.col });
-      this.skipNewlines();
-    }
-
-    // §5.10: case must have at least one when clause
-    if (whenClauses.length === 0) {
-      this.error("'case' requires at least one 'when' clause", caseTok);
-    }
-
-    this.expect(TokenType.Else, "'else'");
-    const elseBranch = this.parseExpression();
-
-    return { kind: "CaseExpr", scrutinee, whenClauses, elseBranch, line: caseTok.line, col: caseTok.col };
-  }
-
-  // ── Struct import (§7) ────────────────────────────────────
-
-  private parseStructImport(): AstNode {
-    const structTok = this.expect(TokenType.Struct, "'struct'");
-    this.skipNewlines();
-    const pathTok = this.expect(TokenType.String, "file path string");
-    // §7.1: import paths must be non-interpolated strings
-    const nextRaw = this.peekRaw();
-    if (Parser.INTERP_EXPR_START.has(nextRaw.type) || nextRaw.type === TokenType.String) {
-      this.error("Interpolation is not allowed in import paths — use a plain string", nextRaw);
-    }
-    return { kind: "StructImport", path: pathTok.value, line: structTok.line, col: structTok.col };
-  }
-
   // ── Type expressions (§6) ─────────────────────────────────
 
-  private parseTypeExpr(): TypeExprNode {
+  parseTypeExpr(): TypeExprNode {
     this.skipNewlines();
     const tok = this.peek();
 

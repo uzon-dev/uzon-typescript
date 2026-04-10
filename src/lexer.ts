@@ -439,45 +439,39 @@ export class Lexer {
     const start = this.pos;
     if (negative) this.advance(); // consume -
 
-    let isFloat = false;
-
     // §4.2: hex (0x), octal (0o), binary (0b) prefix
     if (this.ch() === "0" && this.pos + 1 < this.src.length) {
       const next = this.ch(1).toLowerCase();
       if (next === "x" || next === "o" || next === "b") {
-        this.advance(2);
-        // Leading underscore after base prefix is invalid
-        if (this.pos < this.src.length && this.ch() === "_") {
-          this.lexIdentifierFrom(start, line, col);
-          return;
-        }
-        this.consumeDigits(next === "x" ? "hex" : next === "o" ? "oct" : "bin");
-        // Trailing underscore is invalid
-        if (this.src[this.pos - 1] === "_") {
-          this.lexIdentifierFrom(start, line, col);
-          return;
-        }
-        const raw = this.src.slice(start, this.pos);
-        if (!this.atTokenEnd()) {
-          this.lexIdentifierFrom(start, line, col);
-          return;
-        }
-        // Double underscores not permitted
-        if (raw.includes("__")) {
-          this.lexIdentifierFrom(start, line, col);
-          return;
-        }
-        this.push(TokenType.Integer, raw, line, col);
+        this.lexPrefixedInteger(start, next, line, col);
         return;
       }
     }
 
+    this.lexDecimalNumber(start, line, col);
+  }
+
+  /** §4.2: hex, octal, binary integer literals. */
+  private lexPrefixedInteger(start: number, base: string, line: number, col: number) {
+    this.advance(2);
+    if (this.pos < this.src.length && this.ch() === "_") {
+      this.lexIdentifierFrom(start, line, col);
+      return;
+    }
+    this.consumeDigits(base === "x" ? "hex" : base === "o" ? "oct" : "bin");
+    if (!this.validateNumberToken(start, line, col)) return;
+    this.push(TokenType.Integer, this.src.slice(start, this.pos), line, col);
+  }
+
+  /** §4.2/§4.3: decimal integer or float literal. */
+  private lexDecimalNumber(start: number, line: number, col: number) {
+    let isFloat = false;
     this.consumeDigits("dec");
 
     // Decimal point — requires digit after the dot to avoid ambiguity with member access
     if (this.ch() === "." && this.ch(1) >= "0" && this.ch(1) <= "9") {
       isFloat = true;
-      this.advance(); // .
+      this.advance();
       this.consumeDigits("dec");
     }
 
@@ -486,7 +480,6 @@ export class Lexer {
       isFloat = true;
       this.advance();
       if (this.ch() === "+" || this.ch() === "-") this.advance();
-      // Exponent requires at least one digit
       if (this.pos >= this.src.length || !(this.ch() >= "0" && this.ch() <= "9")) {
         this.lexIdentifierFrom(start, line, col);
         return;
@@ -494,25 +487,25 @@ export class Lexer {
       this.consumeDigits("dec");
     }
 
-    if (!this.atTokenEnd()) {
-      // e.g. "1st" — not a number, treat as identifier
-      this.lexIdentifierFrom(start, line, col);
-      return;
-    }
+    if (!this.validateNumberToken(start, line, col)) return;
+    this.push(isFloat ? TokenType.Float : TokenType.Integer, this.src.slice(start, this.pos), line, col);
+  }
 
-    // Trailing underscore is invalid
+  /** Validate the consumed number token: trailing underscore, double underscore, token end. */
+  private validateNumberToken(start: number, line: number, col: number): boolean {
+    if (!this.atTokenEnd()) {
+      this.lexIdentifierFrom(start, line, col);
+      return false;
+    }
     if (this.src[this.pos - 1] === "_") {
       this.lexIdentifierFrom(start, line, col);
-      return;
+      return false;
     }
-
-    const raw = this.src.slice(start, this.pos);
-    // Double underscores not permitted
-    if (raw.includes("__")) {
+    if (this.src.slice(start, this.pos).includes("__")) {
       this.lexIdentifierFrom(start, line, col);
-      return;
+      return false;
     }
-    this.push(isFloat ? TokenType.Float : TokenType.Integer, raw, line, col);
+    return true;
   }
 
   /** Consume digits (with underscore separators) for the given numeric base. */
