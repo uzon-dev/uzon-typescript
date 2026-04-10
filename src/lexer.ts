@@ -113,6 +113,7 @@ export class Lexer {
     const col = this.col;
 
     if (this.tryLexNewline(c, line, col)) return;
+    if (this.tryLexInterpolationString(c, line, col)) return;
     if (this.tryLexStringStart(c, line, col)) return;
     if (this.tryLexInterpolationClose(c)) return;
     if (this.tryLexTwoCharOp(c, line, col)) return;
@@ -151,6 +152,32 @@ export class Lexer {
     this.modeStack.push(Mode.String);
     this.push(TokenType.String, "", this.line, col);
     return true;
+  }
+
+  // ── Escaped string inside interpolation: \"content\" ──
+
+  private tryLexInterpolationString(c: string, line: number, col: number): boolean {
+    if (
+      c !== "\\" || this.pos + 1 >= this.src.length || this.ch(1) !== '"' ||
+      this.modeStack[this.modeStack.length - 1] !== Mode.Interpolation
+    ) return false;
+
+    this.advance(); // consume backslash
+    this.advance(); // consume opening "
+    let content = "";
+    while (this.pos < this.src.length) {
+      const sc = this.ch();
+      if (sc === "\\" && this.pos + 1 < this.src.length && this.ch(1) === '"') {
+        this.advance(); // consume backslash
+        this.advance(); // consume closing "
+        this.push(TokenType.String, content, line, col);
+        return true;
+      }
+      if (sc === "\\") { content += this.lexEscape(); continue; }
+      if (sc === "\n" || sc === "\r") this.error("Unterminated string literal");
+      content += this.advance();
+    }
+    this.error("Unterminated escaped string in interpolation");
   }
 
   // ── Interpolation closing brace ──
