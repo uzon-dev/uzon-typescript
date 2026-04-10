@@ -697,7 +697,12 @@ export class Evaluator implements EvalContext {
       throw new UzonCircularError(`Circular file import: ${resolvedPath}`, node.line, node.col);
     }
 
-    const source = this.fileReader(resolvedPath);
+    let source: string;
+    try {
+      source = this.fileReader(resolvedPath);
+    } catch {
+      throw new UzonRuntimeError(`Cannot read file: ${resolvedPath}`, node.line, node.col);
+    }
     const tokens = new Lexer(source).tokenize();
     const doc = new Parser(tokens).parse();
 
@@ -712,9 +717,17 @@ export class Evaluator implements EvalContext {
       listElementTypes: this.listElementTypes,
     });
 
-    const result = childEval.evaluate(doc);
-    this.importCache.set(resolvedPath, result);
-    return result as unknown as UzonValue;
+    try {
+      const result = childEval.evaluate(doc);
+      this.importCache.set(resolvedPath, result);
+      return result as unknown as UzonValue;
+    } catch (e) {
+      if (e instanceof UzonError) {
+        if (!e.filename) e.withFilename(resolvedPath);
+        e.addImportFrame(this.filename ?? "<string>", node.line, node.col);
+      }
+      throw e;
+    }
   }
 
   private normalizePath(p: string): string {
