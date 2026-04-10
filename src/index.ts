@@ -28,6 +28,8 @@ export {
   UzonCircularError,
 } from "./error.js";
 
+export type { ImportFrame } from "./error.js";
+
 export {
   UZON_UNDEFINED,
   UzonEnum,

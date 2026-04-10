@@ -14,10 +14,17 @@
  * All errors include line/col location per §11.2.0.
  */
 
+export interface ImportFrame {
+  filename: string;
+  line: number;
+  col: number;
+}
+
 export class UzonError extends Error {
   readonly line?: number;
   readonly col?: number;
   filename?: string;
+  readonly importTrace: ImportFrame[] = [];
 
   constructor(message: string, line?: number, col?: number) {
     const loc =
@@ -32,10 +39,37 @@ export class UzonError extends Error {
   withFilename(filename: string): this {
     if (this.filename) return this;
     this.filename = filename;
-    if (this.line != null && this.col != null) {
-      this.message = `${filename}:${this.line}:${this.col}: ${this.message.replace(/^Line \d+, col \d+: /, "")}`;
-    }
+    this.rebuildMessage();
     return this;
+  }
+
+  /** Add an import-site frame to the trace (called by the importing evaluator). */
+  addImportFrame(filename: string, line: number, col: number): this {
+    this.importTrace.push({ filename, line, col });
+    this.rebuildMessage();
+    return this;
+  }
+
+  private rebuildMessage(): void {
+    // Core message without any location prefix
+    const core = this.message.replace(/^(?:.*?:\d+:\d+: |Line \d+, col \d+: )/, "");
+
+    // Error origin line
+    let msg: string;
+    if (this.filename && this.line != null && this.col != null) {
+      msg = `${this.filename}:${this.line}:${this.col}: ${core}`;
+    } else if (this.line != null && this.col != null) {
+      msg = `Line ${this.line}, col ${this.col}: ${core}`;
+    } else {
+      msg = core;
+    }
+
+    // Import stack trace
+    for (const frame of this.importTrace) {
+      msg += `\n  at ${frame.filename}:${frame.line}:${frame.col}`;
+    }
+
+    this.message = msg;
   }
 }
 
