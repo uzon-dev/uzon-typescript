@@ -193,7 +193,7 @@ describe("Evaluator", () => {
     });
   });
 
-  // ── Self reference (§3.1) ─────────────────────────────────────
+  // ── Binding reference (§3.1) ───────────────────────────────────
 
   describe("binding reference", () => {
     it("basic field reference", () => {

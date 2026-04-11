@@ -8,7 +8,7 @@
  *
  * Key design decisions (all bug fixes from the reference absorbed):
  * - Dependency graph + topological sort for binding evaluation order (§3.1)
- * - Self-exclusion: lookups skip the binding currently being evaluated
+ * - Binding self-exclusion: lookups skip the binding currently being evaluated
  * - Adoptable numeric defaults: untyped literals are ~i64/~f64 until resolved
  * - Tagged union transparency: unwrap for operations, NOT for `with` (§3.7.1)
  * - Speculative branch evaluation: non-taken branches propagate type errors (§5.9)
@@ -142,17 +142,17 @@ export class Evaluator implements EvalContext {
   // ── Binding evaluation with dependency graph ──
 
   evaluateBindings(
-    bindings: BindingNode[], scope: Scope, allowSelfExclusion = false,
+    bindings: BindingNode[], scope: Scope, allowOverloads = false,
     locals?: Map<string, UzonValue>,
   ): void {
-    const { bindingMap, order } = this.resolveBindingOrder(bindings, allowSelfExclusion);
+    const { bindingMap, order } = this.resolveBindingOrder(bindings, allowOverloads);
     this.validateBindings(bindings);
     this.evaluateInOrder(order, bindingMap, scope, locals);
   }
 
   /** Step 1+2: Build dependency graph + topological sort. */
   private resolveBindingOrder(
-    bindings: BindingNode[], allowSelfExclusion: boolean,
+    bindings: BindingNode[], allowOverloads: boolean,
   ): { bindingMap: Map<string, BindingNode>; order: string[] } {
     const deps = new Map<string, Set<string>>();
     const bindingMap = new Map<string, BindingNode>();
@@ -161,7 +161,7 @@ export class Evaluator implements EvalContext {
 
     for (const b of bindings) {
       if (names.has(b.name)) {
-        if (!allowSelfExclusion
+        if (!allowOverloads
             || (b.value.kind !== "FunctionExpr" && b.value.kind !== "FieldExtraction")) {
           throw new UzonSyntaxError(`Duplicate binding '${b.name}'`, b.line, b.col);
         }
