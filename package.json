@@ -19,6 +19,24 @@
   "files": [
     "dist"
   ],
+  "keywords": [
+    "uzon",
+    "config",
+    "configuration",
+    "parser",
+    "data-format",
+    "typed",
+    "human-readable",
+    "serialization"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/uzon-dev/uzon-typescript.git"
+  },
+  "homepage": "https://github.com/uzon-dev/uzon-typescript",
+  "bugs": {
+    "url": "https://github.com/uzon-dev/uzon-typescript/issues"
+  },
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^25.6.0",
