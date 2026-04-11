@@ -11,10 +11,15 @@
       "types": "./dist/index.d.ts"
     }
   },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "uzon-dev",
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepublishOnly": "tsc && vitest run"
   },
   "files": [
     "dist"
