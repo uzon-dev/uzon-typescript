@@ -261,6 +261,8 @@ function stdSplit(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: 
   if (typeof str !== "string" || typeof delim !== "string") {
     throw new UzonTypeError("std.split requires two string arguments", node.line, node.col);
   }
+  if (str === "") return [""];
+  if (delim === "") return [...str];
   return str.split(delim);
 }
 
