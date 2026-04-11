@@ -103,6 +103,10 @@ export class UzonTuple {
   [Symbol.iterator](): Iterator<UzonValue> {
     return this.elements[Symbol.iterator]();
   }
+
+  toString(): string {
+    return `(${this.elements.map(displayValue).join(", ")})`;
+  }
 }
 
 // ── Function (§3.8) ───────────────────────────────────────────────
@@ -119,6 +123,13 @@ export class UzonFunction {
     public readonly closureScope: unknown,
     public readonly typeName: string | null = null,
   ) {}
+
+  toString(): string {
+    const params = this.paramNames
+      .map((n, i) => `${n}: ${this.paramTypes[i]}`)
+      .join(", ");
+    return `fn(${params}) -> ${this.returnType}`;
+  }
 }
 
 // ── UzonValue ─────────────────────────────────────────────────────
@@ -151,6 +162,36 @@ export type UzonList = UzonValue[];
 /** Struct value — plain object with string keys. */
 export interface UzonStruct {
   [key: string]: UzonValue;
+}
+
+// ── Display helper ──────────────────────────────────────────────────
+
+/**
+ * Human-readable display of any UzonValue, used by toString() on compound types.
+ * Keeps output compact — nested compounds are shown inline.
+ */
+export function displayValue(value: UzonValue): string {
+  if (value === UZON_UNDEFINED) return "undefined";
+  if (value === null) return "null";
+  if (typeof value === "boolean") return String(value);
+  if (typeof value === "bigint") return value.toString();
+  if (typeof value === "number") return formatUzonFloat(value);
+  if (typeof value === "string") return JSON.stringify(value);
+  if (value instanceof UzonEnum) return value.toString();
+  if (value instanceof UzonUnion) return String(value.value);
+  if (value instanceof UzonTaggedUnion) return `${value.tag}(${displayValue(value.value)})`;
+  if (value instanceof UzonTuple) return value.toString();
+  if (value instanceof UzonFunction) return value.toString();
+  if (Array.isArray(value)) {
+    return `[${value.map(displayValue).join(", ")}]`;
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value);
+    if (entries.length === 0) return "{}";
+    const fields = entries.map(([k, v]) => `${k}: ${displayValue(v)}`);
+    return `{ ${fields.join(", ")} }`;
+  }
+  return String(value);
 }
 
 // ── Float formatting (§5.11.2) ────────────────────────────────────
