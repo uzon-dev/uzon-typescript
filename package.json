@@ -1,6 +1,6 @@
 {
   "name": "@uzon/uzon",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "UZON parser and evaluator for TypeScript/JavaScript",
   "type": "module",
   "main": "./dist/index.js",

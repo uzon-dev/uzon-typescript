@@ -12,9 +12,9 @@ npm install @uzon/uzon
 import { parse } from "@uzon/uzon";
 
 const config = parse(`
-  host is "localhost"
-  port is 8080
-  debug is true
+    host is "localhost"
+    port is 8080
+    debug is true
 `);
 
 console.log(config.host);  // "localhost"
@@ -27,16 +27,17 @@ console.log(config.debug); // true
 UZON is a configuration and data format with a rich type system:
 
 ```
-// Primitives
+// Primitives and typed numerics
 name is "Alice"
 age is 30
-rate is 3.14
+rate is 3.14 as f32
 active is true
 nothing is null
 
 // Lists and tuples
 tags are "api", "v2"
 point is (10, 20)
+matrix is [[ 1, 2 ], [ 3, 4 ]]
 
 // Structs (nested objects)
 database is {
@@ -45,39 +46,57 @@ database is {
 }
 
 // Enums and tagged unions
-color is red from red, green, blue
+color is red from red, green, blue called Color
 status is "ok" named success from success as string, failure as string
 
-// Expressions
+// Expressions and string interpolation
 total is price * quantity
 greeting is "Hello, {name}!"
+label is first_name ++ " " ++ last_name
 
-// Environment variables
-port is env.PORT as u16 or else 8080
+// Conditionals
+tier is if score >= 90 then "gold" else "silver"
+msg is case level
+    when high then "critical"
+    when low then "minor"
+    else "normal"
+
+// Functions
+double is function n as i32 returns i32 { n * 2 }
+evens is std.filter(numbers, function n as i64 returns bool { n % 2 is 0 })
+
+// Struct override and extension
+production is base with { debug is false }
+point3d is point extends { z is 0 as i32 }
+
+// Conversions and environment variables
+port is env.PORT to u16 or else 8080
 
 // Struct imports
 shared is struct "./shared"
 ```
 
+For the full language specification, see [UZON Specification](https://github.com/uzon-dev).
+
 ## Value Types
 
 UZON values in TypeScript are represented by the `UzonValue` type:
 
-| UZON type | TypeScript type | Example |
-|-----------|----------------|---------|
-| integer | `bigint` | `42n` |
-| float | `number` | `3.14` |
-| string | `string` | `"hello"` |
-| bool | `boolean` | `true` |
-| null | `null` | `null` |
-| list | `UzonValue[]` | `[1n, 2n, 3n]` |
-| tuple | `UzonTuple` | `UzonTuple([1n, "a"])` |
-| struct | `Record<string, UzonValue>` | `{ host: "localhost" }` |
-| enum | `UzonEnum` | `UzonEnum("red", ["red", "green", "blue"])` |
-| union | `UzonUnion` | `UzonUnion(42n, ["i32", "string"])` |
-| tagged union | `UzonTaggedUnion` | `UzonTaggedUnion(42n, "ok", variants)` |
-| function | `UzonFunction` | (first-class, pure) |
-| undefined | `typeof UZON_UNDEFINED` | sentinel for unresolved lookups |
+| UZON type     | TypeScript type            | Example                                      |
+|---------------|----------------------------|----------------------------------------------|
+| integer       | `bigint`                   | `42n`                                        |
+| float         | `number`                   | `3.14`                                       |
+| string        | `string`                   | `"hello"`                                    |
+| bool          | `boolean`                  | `true`                                       |
+| null          | `null`                     | `null`                                       |
+| list          | `UzonValue[]`              | `[1n, 2n, 3n]`                               |
+| tuple         | `UzonTuple`                | `UzonTuple([1n, "a"])`                       |
+| struct        | `Record<string, UzonValue>`| `{ host: "localhost" }`                      |
+| enum          | `UzonEnum`                 | `UzonEnum("red", ["red", "green", "blue"])`  |
+| union         | `UzonUnion`                | `UzonUnion(42n, ["i32", "string"])`          |
+| tagged union  | `UzonTaggedUnion`          | `UzonTaggedUnion(42n, "ok", variants)`       |
+| function      | `UzonFunction`             | (first-class, pure)                          |
+| undefined     | `typeof UZON_UNDEFINED`    | sentinel for unresolved lookups              |
 
 ---
 
@@ -343,14 +362,14 @@ function getOrThrow(value: UzonValue, path: string): UzonValue;
 import { parse, get, getOrThrow } from "@uzon/uzon";
 
 const r = parse(`
-  config is {
-    database is {
-      host is "localhost"
-      port is 5432
+    config is {
+        database is {
+            host is "localhost"
+            port is 5432
+        }
+        servers is [ "alpha", "beta" ]
+        matrix is [[ 1, 2 ], [ 3, 4 ]]
     }
-    servers is ["alpha", "beta"]
-    matrix is [[1, 2], [3, 4]]
-  }
 `);
 
 get(r.config, "database.host");   // "localhost"
@@ -493,18 +512,18 @@ function mergeValues(base: UzonValue, override: UzonValue): UzonValue;
 import { parse, merge } from "@uzon/uzon";
 
 const base = parse(`
-  database is {
-    host is "localhost"
-    port is 5432
-  }
-  debug is false
+    database is {
+        host is "localhost"
+        port is 5432
+    }
+    debug is false
 `);
 
 const prod = parse(`
-  database is {
-    host is "prod-db.example.com"
-  }
-  debug is false
+    database is {
+        host is "prod-db.example.com"
+    }
+    debug is false
 `);
 
 const config = merge(base, prod);
@@ -546,9 +565,9 @@ const host = "localhost";
 const port = 8080;
 
 const config = uzon`
-  host is ${host}
-  port is ${port}
-  color is red from red, green, blue
+    host is ${host}
+    port is ${port}
+    color is red from red, green, blue
 `;
 ```
 
@@ -851,7 +870,7 @@ class UzonError extends Error {
 
 class UzonSyntaxError extends UzonError {}   // Lexical/grammatical violations
 class UzonTypeError extends UzonError {}     // Type annotation mismatches
-class UzonRuntimeError extends UzonError {}  // Overflow, division by zero, etc.
+class UzonRuntimeError extends UzonError {}  // Undefined access, overflow, division by zero, etc.
 class UzonCircularError extends UzonError {} // Circular dependency between bindings
 
 interface ImportFrame {
