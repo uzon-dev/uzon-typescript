@@ -59,6 +59,11 @@ export type { EvalOptions } from "./evaluator.js";
 export { stringify, stringifyValue, toJS } from "./stringify.js";
 export type { StringifyOptions, ToJSOptions } from "./stringify.js";
 
+export {
+  asNumber, asInteger, asString, asBool,
+  asList, asTuple, asStruct, asEnum,
+} from "./convert.js";
+
 // ── Convenience API ─────────────────────────────────────────────
 
 export interface ParseOptions {

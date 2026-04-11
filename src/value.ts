@@ -32,6 +32,10 @@ export class UzonEnum {
     public readonly typeName: string | null = null,
   ) {}
 
+  valueOf(): string {
+    return this.value;
+  }
+
   toString(): string {
     return this.value;
   }
@@ -46,6 +50,14 @@ export class UzonUnion {
     public readonly types: readonly string[],
     public readonly typeName: string | null = null,
   ) {}
+
+  valueOf(): UzonValue {
+    return this.value;
+  }
+
+  toString(): string {
+    return String(this.value);
+  }
 }
 
 // ── Tagged union (§3.7) ────────────────────────────────────────────
@@ -64,6 +76,10 @@ export class UzonTaggedUnion {
     public readonly variants: ReadonlyMap<string, string | null>,
     public readonly typeName: string | null = null,
   ) {}
+
+  valueOf(): UzonValue {
+    return this.value;
+  }
 
   toString(): string {
     return String(this.value);
