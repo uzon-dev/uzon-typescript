@@ -14,7 +14,7 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "author": "uzon-dev",
+  "author": "Suho Kang",
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
@@ -38,7 +38,7 @@
     "type": "git",
     "url": "https://github.com/uzon-dev/uzon-typescript.git"
   },
-  "homepage": "https://github.com/uzon-dev/uzon-typescript",
+  "homepage": "https://uzon.dev",
   "bugs": {
     "url": "https://github.com/uzon-dev/uzon-typescript/issues"
   },
