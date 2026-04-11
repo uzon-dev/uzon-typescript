@@ -27,36 +27,36 @@ console.log(config.debug); // true
 UZON is a configuration and data format with a rich type system:
 
 ```
-# Primitives
+// Primitives
 name is "Alice"
 age is 30
 rate is 3.14
 active is true
 nothing is null
 
-# Lists and tuples
+// Lists and tuples
 tags are "api", "v2"
 point is (10, 20)
 
-# Structs (nested objects)
+// Structs (nested objects)
 database is {
     host is "localhost"
     port is 5432
 }
 
-# Enums and tagged unions
+// Enums and tagged unions
 color is red from red, green, blue
 status is "ok" named success from success as string, failure as string
 
-# Expressions
+// Expressions
 total is price * quantity
 greeting is "Hello, {name}!"
 
-# Environment variables
-port is env.PORT
+// Environment variables
+port is env.PORT as u16 or else 8080
 
-# Struct imports
-shared is struct "shared.uzon"
+// Struct imports
+shared is struct "./shared"
 ```
 
 ## Value Types
