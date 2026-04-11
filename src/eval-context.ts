@@ -16,7 +16,7 @@ import type { UzonValue, UzonFunction } from "./value.js";
 export interface EvalContext {
   // Core evaluation
   evalNode(node: AstNode, scope: Scope, exclude?: string): UzonValue;
-  evaluateBindings(bindings: BindingNode[], scope: Scope, allowSelfExclusion?: boolean, locals?: Map<string, UzonValue>): void;
+  evaluateBindings(bindings: BindingNode[], scope: Scope, allowOverloads?: boolean, locals?: Map<string, UzonValue>): void;
 
   // Contextual resolution (needs evaluator state)
   resolveEnumVariantOrEval(node: AstNode, contextVal: UzonValue, scope: Scope, exclude?: string): UzonValue;

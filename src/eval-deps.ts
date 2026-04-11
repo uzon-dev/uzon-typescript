@@ -10,7 +10,7 @@
 import type { AstNode, BindingNode } from "./ast.js";
 import { UzonCircularError } from "./error.js";
 
-/** Collect the set of self-referenced binding names from an AST node. */
+/** Collect the set of referenced binding names from an AST node. */
 export function collectDeps(node: AstNode, scopeNames: Set<string>): Set<string> {
   const deps = new Set<string>();
   walkDeps(node, deps, scopeNames);

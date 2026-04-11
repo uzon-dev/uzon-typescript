@@ -830,7 +830,7 @@ const UZON_UNDEFINED: unique symbol;
 type UzonUndefined = typeof UZON_UNDEFINED;
 ```
 
-Sentinel for unresolved lookups (e.g. `self.missing`, `env.UNSET`). Not a valid value — propagates through member access but causes errors in operations.
+Sentinel for unresolved lookups (e.g. unresolved identifiers, `env.UNSET`). Not a valid value — propagates through member access but causes errors in operations.
 
 ---
 
