@@ -21,11 +21,7 @@ export function collectDeps(node: AstNode, scopeNames: Set<string>): Set<string>
 function walkDeps(node: AstNode, deps: Set<string>, scopeNames: Set<string>): void {
   switch (node.kind) {
     case "MemberAccess":
-      if (node.object.kind === "SelfRef" && scopeNames.has(node.member)) {
-        deps.add(node.member);
-      } else {
-        walkDeps(node.object, deps, scopeNames);
-      }
+      walkDeps(node.object, deps, scopeNames);
       break;
     case "BinaryOp":
       walkDeps(node.left, deps, scopeNames);
@@ -105,10 +101,13 @@ function walkDeps(node: AstNode, deps: Set<string>, scopeNames: Set<string>): vo
         if (typeof p !== "string") walkDeps(p, deps, scopeNames);
       }
       break;
+    case "Identifier":
+      if (scopeNames.has(node.name)) deps.add(node.name);
+      break;
     // Terminals — no deps
     case "IntegerLiteral": case "FloatLiteral": case "BoolLiteral":
     case "NullLiteral": case "UndefinedLiteral": case "InfLiteral":
-    case "NanLiteral": case "Identifier": case "SelfRef": case "EnvRef":
+    case "NanLiteral": case "EnvRef":
     case "StructImport": case "TypeExpr": case "Document": case "Binding":
       break;
   }

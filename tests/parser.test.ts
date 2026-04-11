@@ -218,11 +218,11 @@ describe("Parser", () => {
     });
 
     it("is named", () => {
-      expect(firstValue("x is self.tu is named ok")).toMatchObject({ kind: "BinaryOp", op: "is named" });
+      expect(firstValue("x is tu is named ok")).toMatchObject({ kind: "BinaryOp", op: "is named" });
     });
 
     it("is not named", () => {
-      expect(firstValue("x is self.tu is not named ok")).toMatchObject({ kind: "BinaryOp", op: "is not named" });
+      expect(firstValue("x is tu is not named ok")).toMatchObject({ kind: "BinaryOp", op: "is not named" });
     });
 
     it("rejects chained is", () => {
@@ -248,7 +248,7 @@ describe("Parser", () => {
 
   describe("or else", () => {
     it("parses undefined coalescing", () => {
-      expect(firstValue("x is self.a or else 1")).toMatchObject({ kind: "OrElse" });
+      expect(firstValue("x is a or else 1")).toMatchObject({ kind: "OrElse" });
     });
   });
 
@@ -281,16 +281,16 @@ describe("Parser", () => {
   // ── Member access (§5.15) ─────────────────────────────────
 
   describe("member access", () => {
-    it("self.x", () => {
-      expect(firstValue("x is self.port")).toMatchObject({ kind: "MemberAccess", member: "port" });
+    it("dotted field access", () => {
+      expect(firstValue("x is config.port")).toMatchObject({ kind: "MemberAccess", member: "port" });
     });
 
-    it("chained: self.a.b.c", () => {
-      expect(firstValue("x is self.a.b.c")).toMatchObject({ kind: "MemberAccess" });
+    it("chained: a.b.c", () => {
+      expect(firstValue("x is a.b.c")).toMatchObject({ kind: "MemberAccess" });
     });
 
-    it("numeric index: self.list.0", () => {
-      expect(firstValue("x is self.list.0")).toMatchObject({ kind: "MemberAccess", member: "0" });
+    it("numeric index: list.0", () => {
+      expect(firstValue("x is list.0")).toMatchObject({ kind: "MemberAccess", member: "0" });
     });
   });
 
@@ -312,7 +312,7 @@ describe("Parser", () => {
     });
 
     it("when named variant", () => {
-      const v = firstValue('x is case self.tu\n  when named ok then "ok"\n  else "other"');
+      const v = firstValue('x is case tu\n  when named ok then "ok"\n  else "other"');
       expect(v.kind).toBe("CaseExpr");
       if (v.kind === "CaseExpr") expect(v.whenClauses[0].isNamed).toBe(true);
     });
@@ -362,12 +362,12 @@ describe("Parser", () => {
 
   describe("struct override", () => {
     it("parses with clause", () => {
-      expect(firstValue("x is self.base with { debug is true }")).toMatchObject({ kind: "StructOverride" });
+      expect(firstValue("x is base with { debug is true }")).toMatchObject({ kind: "StructOverride" });
     });
 
     it("rejects chaining with/extends", () => {
-      expect(() => parse("x is self.a with { b is 1 } with { c is 2 }")).toThrow("Chaining");
-      expect(() => parse("x is self.a with { b is 1 } extends { c is 2 }")).toThrow("Chaining");
+      expect(() => parse("x is a with { b is 1 } with { c is 2 }")).toThrow("Chaining");
+      expect(() => parse("x is a with { b is 1 } extends { c is 2 }")).toThrow("Chaining");
     });
   });
 
@@ -375,7 +375,7 @@ describe("Parser", () => {
 
   describe("struct extension", () => {
     it("parses extends clause", () => {
-      expect(firstValue("x is self.base extends { extra is true }")).toMatchObject({ kind: "StructExtend" });
+      expect(firstValue("x is base extends { extra is true }")).toMatchObject({ kind: "StructExtend" });
     });
   });
 
@@ -383,7 +383,7 @@ describe("Parser", () => {
 
   describe("field extraction", () => {
     it("parses is of", () => {
-      const v = firstValue("port is of self.config");
+      const v = firstValue("port is of config");
       expect(v.kind).toBe("FieldExtraction");
       if (v.kind === "FieldExtraction") expect(v.bindingName).toBe("port");
     });
@@ -401,7 +401,7 @@ describe("Parser", () => {
 
   describe("string interpolation", () => {
     it("parses interpolated string", () => {
-      const v = firstValue('x is "hello {self.name}!"');
+      const v = firstValue('x is "hello {name}!"');
       expect(v.kind).toBe("StringLiteral");
       if (v.kind === "StringLiteral") expect(v.parts.length).toBeGreaterThan(1);
     });
@@ -511,7 +511,7 @@ describe("Parser", () => {
     });
 
     it("function call", () => {
-      const v = firstValue("x is self.f(1, 2)");
+      const v = firstValue("x is f(1, 2)");
       expect(v.kind).toBe("FunctionCall");
       if (v.kind === "FunctionCall") {
         expect(v.args).toHaveLength(2);

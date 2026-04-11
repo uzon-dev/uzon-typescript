@@ -16,7 +16,7 @@ export const INTERP_EXPR_START = new Set([
   TokenType.Identifier, TokenType.Integer, TokenType.Float,
   TokenType.True, TokenType.False, TokenType.Null, TokenType.Undefined,
   TokenType.Inf, TokenType.Nan,
-  TokenType.Self, TokenType.Env,
+  TokenType.Env,
   TokenType.LParen, TokenType.LBrace, TokenType.LBracket,
   TokenType.If, TokenType.Case, TokenType.Struct, TokenType.Function,
   TokenType.Not, TokenType.Minus,

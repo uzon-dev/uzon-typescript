@@ -16,7 +16,7 @@
 
 /**
  * `undefined` in UZON is a *state*, not a value. It arises from unresolved
- * lookups (`self.missing`, `env.UNSET`) and propagates through `.`, `to`,
+ * lookups (`env.UNSET`, unresolved identifiers) and propagates through `.`, `to`,
  * and `as`, but causes runtime errors in arithmetic and most other operators.
  */
 export const UZON_UNDEFINED: unique symbol = Symbol("UzonUndefined");

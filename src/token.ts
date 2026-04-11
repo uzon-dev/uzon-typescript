@@ -55,8 +55,7 @@ export enum TokenType {
   Case,
   When,
 
-  // References (§5.12, §5.13)
-  Self,
+  // References (§5.13)
   Env,
 
   // Import (§7)
@@ -149,7 +148,6 @@ export const KEYWORDS: Record<string, TokenType> = {
   else: TokenType.Else,
   case: TokenType.Case,
   when: TokenType.When,
-  self: TokenType.Self,
   env: TokenType.Env,
   struct: TokenType.Struct,
   in: TokenType.In,
@@ -159,7 +157,7 @@ export const KEYWORDS: Record<string, TokenType> = {
 };
 
 /** Reserved words that are not yet keywords (§2.5). */
-export const RESERVED_KEYWORDS = new Set(["lazy", "type"]);
+export const RESERVED_KEYWORDS = new Set(["self", "lazy", "type"]);
 
 /**
  * Characters that unconditionally terminate an identifier token (§2.3).
@@ -177,7 +175,7 @@ const VALUE_TOKEN_TYPES = new Set([
   TokenType.Integer, TokenType.Float, TokenType.String,
   TokenType.True, TokenType.False, TokenType.Null,
   TokenType.Inf, TokenType.Nan, TokenType.Undefined,
-  TokenType.Identifier, TokenType.Self, TokenType.Env,
+  TokenType.Identifier, TokenType.Env,
   TokenType.RParen, TokenType.RBracket, TokenType.RBrace,
 ]);
 

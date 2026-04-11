@@ -55,7 +55,7 @@ describe("Lexer", () => {
 
   describe("keywords", () => {
     it("recognizes all active keywords", () => {
-      const src = "is are from called as named with union extends to of and or not if then else case when self env struct in function returns default";
+      const src = "is are from called as named with union extends to of and or not if then else case when env struct in function returns default";
       const toks = new Lexer(src).tokenize();
       const kwTypes = toks.slice(0, -1).map((t) => t.type);
       expect(kwTypes).toEqual([
@@ -63,13 +63,14 @@ describe("Lexer", () => {
         TokenType.As, TokenType.Named, TokenType.With, TokenType.Union,
         TokenType.Extends, TokenType.To, TokenType.Of, TokenType.And,
         TokenType.Or, TokenType.Not, TokenType.If, TokenType.Then,
-        TokenType.Else, TokenType.Case, TokenType.When, TokenType.Self,
+        TokenType.Else, TokenType.Case, TokenType.When,
         TokenType.Env, TokenType.Struct, TokenType.In, TokenType.Function,
         TokenType.Returns, TokenType.Default,
       ]);
     });
 
     it("rejects reserved keywords as identifiers", () => {
+      expect(() => new Lexer("self is 5").tokenize()).toThrow("reserved keyword");
       expect(() => new Lexer("lazy is 5").tokenize()).toThrow("reserved keyword");
       expect(() => new Lexer("type is 5").tokenize()).toThrow("reserved keyword");
     });
@@ -276,31 +277,31 @@ describe("Lexer", () => {
   // ── String interpolation ────────────────────────────────────
 
   describe("string interpolation", () => {
-    it("simple interpolation: {self.name}", () => {
-      const toks = new Lexer('"hello {self.name}"').tokenize();
+    it("simple interpolation: {name}", () => {
+      const toks = new Lexer('"hello {name}"').tokenize();
       const nonEof = toks.filter((t) => t.type !== TokenType.Eof);
       expect(nonEof.map((t) => t.type)).toEqual([
         TokenType.String,
-        TokenType.Self, TokenType.Dot, TokenType.Identifier,
+        TokenType.Identifier,
         TokenType.String,
       ]);
       expect(nonEof[0].value).toBe("hello ");
     });
 
     it("interpolation with arithmetic expression", () => {
-      const toks = new Lexer('"{self.a + self.b}"').tokenize();
+      const toks = new Lexer('"{a + b}"').tokenize();
       const nonEof = toks.filter((t) => t.type !== TokenType.Eof);
       expect(nonEof.map((t) => t.type)).toEqual([
         TokenType.String,
-        TokenType.Self, TokenType.Dot, TokenType.Identifier,
+        TokenType.Identifier,
         TokenType.Plus,
-        TokenType.Self, TokenType.Dot, TokenType.Identifier,
+        TokenType.Identifier,
         TokenType.String,
       ]);
     });
 
     it("nested braces inside interpolation", () => {
-      const toks = new Lexer('"val: {self.fn({x is 1})}"').tokenize();
+      const toks = new Lexer('"val: {fn({x is 1})}"').tokenize();
       const nonEof = toks.filter((t) => t.type !== TokenType.Eof);
       expect(nonEof[0].type).toBe(TokenType.String);
       expect(nonEof[nonEof.length - 1].type).toBe(TokenType.String);

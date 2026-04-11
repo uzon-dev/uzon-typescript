@@ -299,9 +299,5 @@ function extractStdFunctionName(callee: AstNode): string | null {
   if (ma.object.kind === "Identifier" && (ma.object as { name: string }).name === "std") {
     return ma.member;
   }
-  if (ma.object.kind === "MemberAccess") {
-    const inner = ma.object as { object: AstNode; member: string };
-    if (inner.object.kind === "SelfRef" && inner.member === "std") return ma.member;
-  }
   return null;
 }

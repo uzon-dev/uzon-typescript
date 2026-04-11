@@ -195,29 +195,29 @@ describe("Evaluator", () => {
 
   // ── Self reference (§3.1) ─────────────────────────────────────
 
-  describe("self reference", () => {
-    it("basic self.field", () => {
-      const r = evaluate("a is 10\nb is self.a + 5");
+  describe("binding reference", () => {
+    it("basic field reference", () => {
+      const r = evaluate("a is 10\nb is a + 5");
       expect(r.b).toBe(15n);
     });
 
     it("forward reference", () => {
-      const r = evaluate("a is self.b + 1\nb is 10");
+      const r = evaluate("a is b + 1\nb is 10");
       expect(r.a).toBe(11n);
     });
 
     it("self-exclusion returns undefined", () => {
-      const r = evaluate("x is self.x or else 42");
+      const r = evaluate("x is x or else 42");
       expect(r.x).toBe(42n);
     });
 
-    it("nested struct self", () => {
-      const r = evaluate("s is { a is 1, b is self.a + 1 }");
+    it("nested struct reference", () => {
+      const r = evaluate("s is { a is 1, b is a + 1 }");
       expect((r.s as any).b).toBe(2n);
     });
 
     it("circular reference throws", () => {
-      expect(() => evaluate("a is self.b\nb is self.a")).toThrow();
+      expect(() => evaluate("a is b\nb is a")).toThrow();
     });
   });
 
@@ -284,12 +284,12 @@ describe("Evaluator", () => {
 
   describe("string interpolation", () => {
     it("basic interpolation", () => {
-      const r = evaluate('name is "world"\ngreeting is "hello {self.name}"');
+      const r = evaluate('name is "world"\ngreeting is "hello {name}"');
       expect(r.greeting).toBe("hello world");
     });
 
     it("arithmetic in interpolation", () => {
-      const r = evaluate('a is 2\nb is 3\nc is "{self.a + self.b}"');
+      const r = evaluate('a is 2\nb is 3\nc is "{a + b}"');
       expect(r.c).toBe("5");
     });
   });
@@ -304,7 +304,7 @@ describe("Evaluator", () => {
     });
 
     it("nested struct access", () => {
-      const r = evaluate("s is { inner is { val is 42 } }\nx is self.s.inner.val");
+      const r = evaluate("s is { inner is { val is 42 } }\nx is s.inner.val");
       expect(r.x).toBe(42n);
     });
 
@@ -327,12 +327,12 @@ describe("Evaluator", () => {
     });
 
     it("element access by ordinal", () => {
-      const r = evaluate("items is [10, 20, 30]\nx is self.items.first");
+      const r = evaluate("items is [10, 20, 30]\nx is items.first");
       expect(r.x).toBe(10n);
     });
 
     it("out of bounds returns undefined", () => {
-      const r = evaluate("items is [10]\nx is self.items.second or else 99");
+      const r = evaluate("items is [10]\nx is items.second or else 99");
       expect(r.x).toBe(99n);
     });
   });
@@ -434,13 +434,13 @@ describe("Evaluator", () => {
 
   describe("with (struct override)", () => {
     it("overrides existing field", () => {
-      const r = evaluate("base is { a is 1, b is 2 }\nx is self.base with { a is 10 }");
+      const r = evaluate("base is { a is 1, b is 2 }\nx is base with { a is 10 }");
       expect((r.x as any).a).toBe(10n);
       expect((r.x as any).b).toBe(2n);
     });
 
     it("rejects new field", () => {
-      expect(() => evaluate("base is { a is 1 }\nx is self.base with { z is 9 }")).toThrow();
+      expect(() => evaluate("base is { a is 1 }\nx is base with { z is 9 }")).toThrow();
     });
   });
 
@@ -453,10 +453,12 @@ describe("Evaluator", () => {
       expect((r.c as UzonEnum).value).toBe("red");
     });
 
-    it("invalid variant access throws", () => {
-      expect(() => evaluate(
-        "c is red from red, green called Color\nx is Color.purple"
-      )).toThrow();
+    it("invalid variant access returns undefined", () => {
+      // Color is a type name (via called), not a binding — bare identifier returns UZON_UNDEFINED
+      const r = evaluate(
+        "c is red from red, green called Color\nx is Color.purple or else 99"
+      );
+      expect(r.x).toBe(99n);
     });
 
     it("called names the type", () => {
@@ -467,7 +469,7 @@ describe("Evaluator", () => {
     it("enum equality via is", () => {
       const r = evaluate(
         "c is red from red, green, blue called Color\n" +
-        "x is self.c is red"
+        "x is c is red"
       );
       expect(r.x).toBe(true);
     });
@@ -496,7 +498,7 @@ describe("Evaluator", () => {
     it("is named check", () => {
       const r = evaluate(
         'h is "ok" named ok from ok as string, err as string\n' +
-        'x is self.h is named ok'
+        'x is h is named ok'
       );
       expect(r.x).toBe(true);
     });
@@ -504,7 +506,7 @@ describe("Evaluator", () => {
     it("transparency: arithmetic on inner value", () => {
       const r = evaluate(
         "score is 7 named high from high as i32, low as i32 called Score\n" +
-        "x is self.score + 3"
+        "x is score + 3"
       );
       expect(r.x).toBe(10n);
     });
@@ -512,7 +514,7 @@ describe("Evaluator", () => {
     it("transparency: comparison on inner value", () => {
       const r = evaluate(
         "score is 7 named high from high as i32, low as i32 called Score\n" +
-        "x is self.score > 5"
+        "x is score > 5"
       );
       expect(r.x).toBe(true);
     });
@@ -522,7 +524,7 @@ describe("Evaluator", () => {
 
   describe("of (field extraction)", () => {
     it("extracts field", () => {
-      const r = evaluate("s is { a is 1, b is 2 }\na is of self.s");
+      const r = evaluate("s is { a is 1, b is 2 }\na is of s");
       expect(r.a).toBe(1n);
     });
   });
@@ -581,7 +583,7 @@ describe("Evaluator", () => {
 
   describe("with struct shape validation", () => {
     it("rejects unknown fields", () => {
-      expect(() => evaluate("base is { a is 1 }\nx is self.base with { b is 2 }")).toThrow();
+      expect(() => evaluate("base is { a is 1 }\nx is base with { b is 2 }")).toThrow();
     });
   });
 
@@ -603,7 +605,7 @@ describe("Evaluator", () => {
     it("bare identifier in is context", () => {
       const r = evaluate(
         "c is red from red, green, blue called Color\n" +
-        "x is self.c is red"
+        "x is c is red"
       );
       expect(r.x).toBe(true);
     });
@@ -615,7 +617,7 @@ describe("Evaluator", () => {
     it("basic function definition and call", () => {
       const r = evaluate(
         "add is function a as i32, b as i32 returns i32 { a + b }\n" +
-        "x is self.add(1, 2)"
+        "x is add(1, 2)"
       );
       expect(r.x).toBe(3n);
     });
@@ -623,7 +625,7 @@ describe("Evaluator", () => {
     it("zero-parameter function", () => {
       const r = evaluate(
         'greeting is function returns string { "hello" }\n' +
-        "x is self.greeting()"
+        "x is greeting()"
       );
       expect(r.x).toBe("hello");
     });
@@ -631,7 +633,7 @@ describe("Evaluator", () => {
     it("default parameters", () => {
       const r = evaluate(
         'greet is function name as string, prefix as string default "Hello" returns string { "{prefix} {name}" }\n' +
-        'x is self.greet("world")'
+        'x is greet("world")'
       );
       expect(r.x).toBe("Hello world");
     });
@@ -642,7 +644,7 @@ describe("Evaluator", () => {
         "  clamped is if val < lo then lo else if val > hi then hi else val\n" +
         "  clamped\n" +
         "}\n" +
-        "x is self.clamp(150, 0, 100)"
+        "x is clamp(150, 0, 100)"
       );
       expect(r.x).toBe(100n);
     });
@@ -650,23 +652,23 @@ describe("Evaluator", () => {
     it("wrong argument count throws", () => {
       expect(() => evaluate(
         "f is function a as i32 returns i32 { a }\n" +
-        "x is self.f(1, 2)"
+        "x is f(1, 2)"
       )).toThrow();
     });
 
     it("type mismatch throws", () => {
       expect(() => evaluate(
-        'f is function a as i32 returns i32 { a }\nx is self.f("hello")'
+        'f is function a as i32 returns i32 { a }\nx is f("hello")'
       )).toThrow();
     });
 
     it("calling non-function throws", () => {
-      expect(() => evaluate("f is 42\nx is self.f(1)")).toThrow();
+      expect(() => evaluate("f is 42\nx is f(1)")).toThrow();
     });
 
     it("recursion detection", () => {
       expect(() => evaluate(
-        "f is function n as i32 returns i32 { self.f(n - 1) }\nx is self.f(5)"
+        "f is function n as i32 returns i32 { f(n - 1) }\nx is f(5)"
       )).toThrow();
     });
 
@@ -679,7 +681,7 @@ describe("Evaluator", () => {
       expect(() => evaluate(
         "f is function returns i32 { 1 }\n" +
         "g is function returns i32 { 1 }\n" +
-        "x is self.f is self.g"
+        "x is f is g"
       )).toThrow();
     });
 
@@ -687,8 +689,8 @@ describe("Evaluator", () => {
       const r = evaluate(
         "double is function n as i32 returns i32 { n * 2 }\n" +
         "addOne is function n as i32 returns i32 { n + 1 }\n" +
-        "transform is function n as i32 returns i32 { self.addOne(self.double(n)) }\n" +
-        "x is self.transform(5)"
+        "transform is function n as i32 returns i32 { addOne(double(n)) }\n" +
+        "x is transform(5)"
       );
       expect(r.x).toBe(11n);
     });
@@ -698,19 +700,19 @@ describe("Evaluator", () => {
 
   describe("struct extends", () => {
     it("adds new fields", () => {
-      const r = evaluate("base is { a is 1 }\nx is self.base extends { b is 2 }");
+      const r = evaluate("base is { a is 1 }\nx is base extends { b is 2 }");
       expect((r.x as any).a).toBe(1n);
       expect((r.x as any).b).toBe(2n);
     });
 
     it("override and add", () => {
-      const r = evaluate("base is { a is 1 }\nx is self.base extends { a is 10, b is 2 }");
+      const r = evaluate("base is { a is 1 }\nx is base extends { a is 10, b is 2 }");
       expect((r.x as any).a).toBe(10n);
       expect((r.x as any).b).toBe(2n);
     });
 
     it("rejects extends with no new fields", () => {
-      expect(() => evaluate("base is { a is 1 }\nx is self.base extends { a is 2 }")).toThrow();
+      expect(() => evaluate("base is { a is 1 }\nx is base extends { a is 2 }")).toThrow();
     });
 
     it("rejects extends on non-struct", () => {
@@ -730,22 +732,22 @@ describe("Evaluator", () => {
     });
 
     it("std.has", () => {
-      const r = evaluate('s is { a is 1 }\nx is std.has(self.s, "a")');
+      const r = evaluate('s is { a is 1 }\nx is std.has(s, "a")');
       expect(r.x).toBe(true);
     });
 
     it("std.get", () => {
-      const r = evaluate('s is { a is 42 }\nx is std.get(self.s, "a")');
+      const r = evaluate('s is { a is 42 }\nx is std.get(s, "a")');
       expect(r.x).toBe(42n);
     });
 
     it("std.keys", () => {
-      const r = evaluate("s is { a is 1, b is 2 }\nx is std.keys(self.s)");
+      const r = evaluate("s is { a is 1, b is 2 }\nx is std.keys(s)");
       expect(r.x).toEqual(["a", "b"]);
     });
 
     it("std.values", () => {
-      const r = evaluate("s is { a is 1, b is 2 }\nx is std.values(self.s)");
+      const r = evaluate("s is { a is 1, b is 2 }\nx is std.values(s)");
       const val = r.x as UzonTuple;
       expect(val).toBeInstanceOf(UzonTuple);
       expect(val.elements).toEqual([1n, 2n]);
@@ -754,7 +756,7 @@ describe("Evaluator", () => {
     it("std.map", () => {
       const r = evaluate(
         "double is function n as i32 returns i32 { n * 2 }\n" +
-        "x is std.map([1, 2, 3], self.double)"
+        "x is std.map([1, 2, 3], double)"
       );
       expect(r.x).toEqual([2n, 4n, 6n]);
     });
@@ -762,7 +764,7 @@ describe("Evaluator", () => {
     it("std.filter", () => {
       const r = evaluate(
         "isEven is function n as i32 returns bool { n % 2 is 0 }\n" +
-        "x is std.filter([1, 2, 3, 4], self.isEven)"
+        "x is std.filter([1, 2, 3, 4], isEven)"
       );
       expect(r.x).toEqual([2n, 4n]);
     });
@@ -770,7 +772,7 @@ describe("Evaluator", () => {
     it("std.reduce", () => {
       const r = evaluate(
         "add is function acc as i32, n as i32 returns i32 { acc + n }\n" +
-        "x is std.reduce([1, 2, 3, 4], 0, self.add)"
+        "x is std.reduce([1, 2, 3, 4], 0, add)"
       );
       expect(r.x).toBe(10n);
     });
@@ -778,7 +780,7 @@ describe("Evaluator", () => {
     it("std.sort", () => {
       const r = evaluate(
         "asc is function a as i64, b as i64 returns bool { a < b }\n" +
-        "x is std.sort([3, 1, 2], self.asc)"
+        "x is std.sort([3, 1, 2], asc)"
       );
       expect(r.x).toEqual([1n, 2n, 3n]);
     });
@@ -820,7 +822,7 @@ describe("Evaluator", () => {
   describe("speculative evaluation", () => {
     it("non-taken branch type errors are suppressed", () => {
       const r = evaluate(
-        "x is if true then 42 else self.missing + 1"
+        "x is if true then 42 else missing + 1"
       );
       expect(r.x).toBe(42n);
     });
@@ -839,7 +841,7 @@ describe("Evaluator", () => {
 
   describe("unary operators", () => {
     it("unary minus", () => {
-      const r = evaluate("a is 5\nx is -self.a");
+      const r = evaluate("a is 5\nx is -a");
       expect(r.x).toBe(-5n);
     });
 
@@ -855,9 +857,9 @@ describe("Evaluator", () => {
       const r = evaluate(
         "a is 1\n" +
         "b is 1\n" +
-        "c is self.a + self.b\n" +
-        "d is self.b + self.c\n" +
-        "e is self.c + self.d"
+        "c is a + b\n" +
+        "d is b + c\n" +
+        "e is c + d"
       );
       expect(r.a).toBe(1n);
       expect(r.b).toBe(1n);
@@ -870,7 +872,7 @@ describe("Evaluator", () => {
       const r = evaluate(
         "double is function n as i32 returns i32 { n * 2 }\n" +
         "nums is [1, 2, 3]\n" +
-        "x is std.map(self.nums, self.double)"
+        "x is std.map(nums, double)"
       );
       expect(r.x).toEqual([2n, 4n, 6n]);
     });
@@ -880,7 +882,7 @@ describe("Evaluator", () => {
         "config is {\n" +
         "  db is { host is \"localhost\", port is 5432 }\n" +
         "}\n" +
-        "x is self.config.db with { port is 3306 }"
+        "x is config.db with { port is 3306 }"
       );
       expect((r.x as any).host).toBe("localhost");
       expect((r.x as any).port).toBe(3306n);
@@ -889,7 +891,7 @@ describe("Evaluator", () => {
     it("enum in case expression", () => {
       const r = evaluate(
         "c is green from red, green, blue called Color\n" +
-        "x is case self.c\n" +
+        "x is case c\n" +
         "  when red then 1\n" +
         "  when green then 2\n" +
         "  when blue then 3\n" +
@@ -900,9 +902,9 @@ describe("Evaluator", () => {
 
     it("multiple bindings with dependencies", () => {
       const r = evaluate(
-        "width is 10\nheight is 20\narea is self.width * self.height\n" +
-        "perimeter is 2 * (self.width + self.height)\n" +
-        'label is "Area: {self.area}, Perimeter: {self.perimeter}"'
+        "width is 10\nheight is 20\narea is width * height\n" +
+        "perimeter is 2 * (width + height)\n" +
+        'label is "Area: {area}, Perimeter: {perimeter}"'
       );
       expect(r.area).toBe(200n);
       expect(r.perimeter).toBe(60n);
@@ -921,7 +923,7 @@ describe("Evaluator", () => {
         throw new Error(`File not found: ${path}`);
       };
       const r = evaluate(
-        'data is struct "other.uzon"\nx is self.data.value',
+        'data is struct "other.uzon"\nx is data.value',
         { fileReader, filename: "/test/main.uzon" }
       );
       expect(r.x).toBe(42n);
@@ -1044,8 +1046,8 @@ describe("Evaluator", () => {
     it("preserves named struct type after with", () => {
       const r = evaluate(
         "base is { x is 0 as i32, y is 0 as i32 } called Point\n" +
-        "p is self.base with { x is 5 }\n" +
-        "q is self.p with { y is 10 }"
+        "p is base with { x is 5 }\n" +
+        "q is p with { y is 10 }"
       );
       expect((r.q as any).x).toBe(5n);
       expect((r.q as any).y).toBe(10n);
