@@ -35,7 +35,7 @@ active is true
 nothing is null
 
 # Lists and tuples
-tags is ["api", "v2"]
+tags are "api", "v2"
 point is (10, 20)
 
 # Structs (nested objects)
