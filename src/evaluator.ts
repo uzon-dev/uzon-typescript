@@ -451,7 +451,7 @@ export class Evaluator implements EvalContext {
     if (obj === UZON_UNDEFINED) return UZON_UNDEFINED;
     // §5.12: null is a value, not a missing state
     if (obj === null) {
-      throw new UzonRuntimeError(
+      throw new UzonTypeError(
         "Cannot access member on null — null is a value, not a struct. Use 'is null' to check first.",
         node.line, node.col,
       );
