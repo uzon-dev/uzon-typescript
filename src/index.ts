@@ -83,6 +83,8 @@ export { merge, mergeValues } from "./merge.js";
 export { watch } from "./watch.js";
 export type { WatchOptions } from "./watch.js";
 
+export { uzon } from "./builder.js";
+
 // ── Convenience API ─────────────────────────────────────────────
 
 export interface ParseOptions {
