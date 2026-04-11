@@ -3,13 +3,13 @@
 TypeScript/JavaScript implementation of [UZON](https://github.com/uzon-dev) — a typed, human-readable data expression format.
 
 ```
-npm install uzon
+npm install @uzon/uzon
 ```
 
 ## Quick Start
 
 ```typescript
-import { parse } from "uzon";
+import { parse } from "@uzon/uzon";
 
 const config = parse(`
   host is "localhost"
@@ -97,7 +97,7 @@ function parse(source: string, options: ParseOptions & { native: true }): Record
 By default, returns `UzonValue` types. Pass `{ native: true }` to get plain JS types (numbers instead of bigints, etc.).
 
 ```typescript
-import { parse } from "uzon";
+import { parse } from "@uzon/uzon";
 
 // Default: UzonValue types
 const r = parse('x is 42');
@@ -122,7 +122,7 @@ function parseFile(filePath: string, options: ParseOptions & { native: true }): 
 ```
 
 ```typescript
-import { parseFile } from "uzon";
+import { parseFile } from "@uzon/uzon";
 
 const config = parseFile("config.uzon");
 const native = parseFile("config.uzon", { native: true });
@@ -153,7 +153,7 @@ function stringify(bindings: Record<string, any>, options?: StringifyOptions): s
 ```
 
 ```typescript
-import { parse, stringify } from "uzon";
+import { parse, stringify } from "@uzon/uzon";
 
 const config = parse('host is "localhost"\nport is 8080');
 stringify(config);
@@ -169,7 +169,7 @@ function stringifyValue(value: any, indent?: string, multilineThreshold?: number
 ```
 
 ```typescript
-import { stringifyValue } from "uzon";
+import { stringifyValue } from "@uzon/uzon";
 
 stringifyValue(42n);          // "42"
 stringifyValue(3.14);         // "3.14"
@@ -186,7 +186,7 @@ function stringifyFile(filePath: string, bindings: Record<string, UzonValue>, op
 ```
 
 ```typescript
-import { parse, stringifyFile } from "uzon";
+import { parse, stringifyFile } from "@uzon/uzon";
 
 const config = parse('host is "localhost"\nport is 8080');
 stringifyFile("output.uzon", config);
@@ -215,7 +215,7 @@ function toJS(value: UzonValue, options?: ToJSOptions): any;
 ```
 
 ```typescript
-import { parse, toJS } from "uzon";
+import { parse, toJS } from "@uzon/uzon";
 
 const r = parse('x is 42\ny is 3.14');
 toJS(r.x); // 42 (number)
@@ -253,7 +253,7 @@ function isStruct(value: UzonValue): value is Record<string, UzonValue>;
 ```
 
 ```typescript
-import { parse, isInteger, isString, isStruct } from "uzon";
+import { parse, isInteger, isString, isStruct } from "@uzon/uzon";
 
 const r = parse('x is 42\nname is "Alice"\ndb is { host is "localhost" }');
 
@@ -283,7 +283,7 @@ function asEnum(value: UzonValue): UzonEnum;
 ```
 
 ```typescript
-import { parse, asNumber, asString } from "uzon";
+import { parse, asNumber, asString } from "@uzon/uzon";
 
 const r = parse('port is 8080\nhost is "localhost"');
 const port: number = asNumber(r.port); // 8080
@@ -310,7 +310,7 @@ function optionalEnum(value: UzonValue): UzonEnum | undefined;
 ```
 
 ```typescript
-import { parse, optionalNumber } from "uzon";
+import { parse, optionalNumber } from "@uzon/uzon";
 
 const r = parse('port is 8080');
 const port = optionalNumber(r.port) ?? 3000; // 8080
@@ -340,7 +340,7 @@ function getOrThrow(value: UzonValue, path: string): UzonValue;
 ```
 
 ```typescript
-import { parse, get, getOrThrow } from "uzon";
+import { parse, get, getOrThrow } from "@uzon/uzon";
 
 const r = parse(`
   config is {
@@ -382,7 +382,7 @@ function match<T>(
 - Throws `TypeError` if no match and no `_` handler
 
 ```typescript
-import { parse, match, asString } from "uzon";
+import { parse, match, asString } from "@uzon/uzon";
 
 // Enum matching
 const r = parse('color is red from red, green, blue');
@@ -449,7 +449,7 @@ interface ToJSONOptions {
 ```
 
 ```typescript
-import { parse, toJSON, fromJSON } from "uzon";
+import { parse, toJSON, fromJSON } from "@uzon/uzon";
 
 const r = parse('x is 42\ny is inf\ncolor is red from red, green, blue');
 
@@ -490,7 +490,7 @@ function mergeValues(base: UzonValue, override: UzonValue): UzonValue;
 ```
 
 ```typescript
-import { parse, merge } from "uzon";
+import { parse, merge } from "@uzon/uzon";
 
 const base = parse(`
   database is {
@@ -524,7 +524,7 @@ Create UZON values from plain JavaScript without writing UZON syntax.
 Auto-convert a plain JS object. Integer numbers become `bigint`, nested objects become structs, arrays become lists.
 
 ```typescript
-import { uzon } from "uzon";
+import { uzon } from "@uzon/uzon";
 
 const config = uzon({
   host: "localhost",
@@ -540,7 +540,7 @@ const config = uzon({
 Write UZON syntax inline with JS interpolation.
 
 ```typescript
-import { uzon } from "uzon";
+import { uzon } from "@uzon/uzon";
 
 const host = "localhost";
 const port = 8080;
@@ -600,7 +600,7 @@ uzon.value(value: JSInput): UzonValue
 Auto-convert a single value.
 
 ```typescript
-import { uzon } from "uzon";
+import { uzon } from "@uzon/uzon";
 
 const config = uzon({
   host: "localhost",
@@ -626,7 +626,7 @@ function withoutField(struct: Record<string, UzonValue>, key: string): Record<st
 ```
 
 ```typescript
-import { parse, withField, withoutField } from "uzon";
+import { parse, withField, withoutField } from "@uzon/uzon";
 
 const config = parse('host is "localhost"\nport is 8080\ndebug is true');
 
@@ -647,7 +647,7 @@ function removeAt(list: UzonValue[], index: number): UzonValue[];               
 ```
 
 ```typescript
-import { append, prepend, setAt, removeAt } from "uzon";
+import { append, prepend, setAt, removeAt } from "@uzon/uzon";
 
 const list = [1n, 2n, 3n];
 
@@ -676,7 +676,7 @@ function displayValue(value: UzonValue): string;
 ```
 
 ```typescript
-import { parse, displayValue, UzonTuple } from "uzon";
+import { parse, displayValue, UzonTuple } from "@uzon/uzon";
 
 displayValue(42n);                            // "42"
 displayValue("hello");                        // '"hello"'
@@ -722,7 +722,7 @@ interface WatchOptions {
 ```
 
 ```typescript
-import { watch } from "uzon";
+import { watch } from "@uzon/uzon";
 
 const stop = watch("config.uzon", (config) => {
   console.log("Config reloaded:", config);
@@ -862,7 +862,7 @@ interface ImportFrame {
 ```
 
 ```typescript
-import { parse, UzonSyntaxError } from "uzon";
+import { parse, UzonSyntaxError } from "@uzon/uzon";
 
 try {
   parse('x is is is');
@@ -880,7 +880,7 @@ try {
 For advanced use cases, the lexer, parser, and evaluator are exposed directly.
 
 ```typescript
-import { Lexer, Parser, Evaluator } from "uzon";
+import { Lexer, Parser, Evaluator } from "@uzon/uzon";
 
 const tokens = new Lexer(source).tokenize();
 const ast = new Parser(tokens).parse();
@@ -1010,7 +1010,7 @@ formatUzonFloat(NaN);      // "nan"
 UZON compound types support standard JS iteration:
 
 ```typescript
-import { parse } from "uzon";
+import { parse } from "@uzon/uzon";
 
 const r = parse('items is [1, 2, 3]\npoint is (10, 20)');
 
