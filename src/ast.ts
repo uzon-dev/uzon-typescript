@@ -68,10 +68,6 @@ export interface IdentifierNode extends NodeBase {
   name: string;
 }
 
-export interface SelfRefNode extends NodeBase {
-  kind: "SelfRef";
-}
-
 export interface EnvRefNode extends NodeBase {
   kind: "EnvRef";
 }
@@ -287,7 +283,6 @@ export type AstNode =
   | InfLiteralNode
   | NanLiteralNode
   | IdentifierNode
-  | SelfRefNode
   | EnvRefNode
   | MemberAccessNode
   | FunctionCallNode

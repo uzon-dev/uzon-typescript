@@ -17,7 +17,7 @@ describe("Functions (§3.8)", () => {
     it("defines and calls a simple function", () => {
       const r = evaluate(`
         double is function n as i32 returns i32 { n * 2 }
-        result is self.double(5)
+        result is double(5)
       `);
       expect(r.result).toBe(10n);
     });
@@ -25,7 +25,7 @@ describe("Functions (§3.8)", () => {
     it("zero-parameter function", () => {
       const r = evaluate(`
         getAnswer is function returns i32 { 42 }
-        result is self.getAnswer()
+        result is getAnswer()
       `);
       expect(r.result).toBe(42n);
     });
@@ -33,7 +33,7 @@ describe("Functions (§3.8)", () => {
     it("function with multiple params", () => {
       const r = evaluate(`
         add is function a as i32, b as i32 returns i32 { a + b }
-        result is self.add(3, 7)
+        result is add(3, 7)
       `);
       expect(r.result).toBe(10n);
     });
@@ -41,7 +41,7 @@ describe("Functions (§3.8)", () => {
     it("function returning bool", () => {
       const r = evaluate(`
         isEven is function n as i64 returns bool { n % 2 is 0 }
-        result is self.isEven(4)
+        result is isEven(4)
       `);
       expect(r.result).toBe(true);
     });
@@ -49,7 +49,7 @@ describe("Functions (§3.8)", () => {
     it("function returning string", () => {
       const r = evaluate(`
         greet is function name as string returns string { "Hello, " ++ name }
-        result is self.greet("UZON")
+        result is greet("UZON")
       `);
       expect(r.result).toBe("Hello, UZON");
     });
@@ -57,7 +57,7 @@ describe("Functions (§3.8)", () => {
     it("function with float params", () => {
       const r = evaluate(`
         area is function r as f64 returns f64 { r * r * 3.14 }
-        result is self.area(2.0)
+        result is area(2.0)
       `);
       expect(r.result).toBeCloseTo(12.56);
     });
@@ -69,7 +69,7 @@ describe("Functions (§3.8)", () => {
         greet is function name as string default "world" returns string {
           "Hello, " ++ name
         }
-        result is self.greet()
+        result is greet()
       `);
       expect(r.result).toBe("Hello, world");
     });
@@ -79,7 +79,7 @@ describe("Functions (§3.8)", () => {
         greet is function name as string default "world" returns string {
           "Hello, " ++ name
         }
-        result is self.greet("UZON")
+        result is greet("UZON")
       `);
       expect(r.result).toBe("Hello, UZON");
     });
@@ -89,9 +89,9 @@ describe("Functions (§3.8)", () => {
         f is function a as i32, b as i32 default 10, c as i32 default 20 returns i32 {
           a + b + c
         }
-        r1 is self.f(1)
-        r2 is self.f(1, 2)
-        r3 is self.f(1, 2, 3)
+        r1 is f(1)
+        r2 is f(1, 2)
+        r3 is f(1, 2, 3)
       `);
       expect(r.r1).toBe(31n);
       expect(r.r2).toBe(23n);
@@ -106,9 +106,9 @@ describe("Functions (§3.8)", () => {
           clamped_lo is if n < lo then lo else n
           if clamped_lo > hi then hi else clamped_lo
         }
-        r1 is self.clamp(5, 0, 10)
-        r2 is self.clamp(-5, 0, 10)
-        r3 is self.clamp(15, 0, 10)
+        r1 is clamp(5, 0, 10)
+        r2 is clamp(-5, 0, 10)
+        r3 is clamp(15, 0, 10)
       `);
       expect(r.r1).toBe(5n);
       expect(r.r2).toBe(0n);
@@ -116,12 +116,12 @@ describe("Functions (§3.8)", () => {
     });
   });
 
-  describe("self references in function body", () => {
-    it("references outer binding via self", () => {
+  describe("outer references in function body", () => {
+    it("references outer binding", () => {
       const r = evaluate(`
         base is 10
-        addBase is function n as i64 returns i64 { n + self.base }
-        result is self.addBase(5)
+        addBase is function n as i64 returns i64 { n + base }
+        result is addBase(5)
       `);
       expect(r.result).toBe(15n);
     });
@@ -130,8 +130,8 @@ describe("Functions (§3.8)", () => {
       const r = evaluate(`
         double is function n as i32 returns i32 { n * 2 }
         addOne is function n as i32 returns i32 { n + 1 }
-        transform is function n as i32 returns i32 { self.addOne(self.double(n)) }
-        result is self.transform(5)
+        transform is function n as i32 returns i32 { addOne(double(n)) }
+        result is transform(5)
       `);
       expect(r.result).toBe(11n);
     });
@@ -150,35 +150,35 @@ describe("Functions (§3.8)", () => {
     it("wrong argument count", () => {
       expect(() => evaluate(`
         add is function a as i32, b as i32 returns i32 { a + b }
-        result is self.add(1)
+        result is add(1)
       `)).toThrow();
     });
 
     it("too many arguments", () => {
       expect(() => evaluate(`
         f is function n as i32 returns i32 { n }
-        result is self.f(1, 2)
+        result is f(1, 2)
       `)).toThrow();
     });
 
     it("argument type mismatch", () => {
       expect(() => evaluate(`
         f is function n as i32 returns i32 { n }
-        result is self.f("hello")
+        result is f("hello")
       `)).toThrow();
     });
 
     it("return type mismatch", () => {
       expect(() => evaluate(`
         f is function n as i32 returns bool { n }
-        result is self.f(1)
+        result is f(1)
       `)).toThrow();
     });
 
     it("calling non-function is type error", () => {
       expect(() => evaluate(`
         x is 42
-        result is self.x(1)
+        result is x(1)
       `)).toThrow();
     });
 
@@ -186,15 +186,15 @@ describe("Functions (§3.8)", () => {
       expect(() => evaluate(`
         f is function n as i32 returns i32 { n }
         g is function n as i32 returns i32 { n }
-        result is self.f is self.g
+        result is f is g
       `)).toThrow(/function/i);
     });
 
     it("recursion is detected", () => {
       expect(() => evaluate(`
-        f is function n as i32 returns i32 { self.g(n) }
-        g is function n as i32 returns i32 { self.f(n) }
-        result is self.f(1)
+        f is function n as i32 returns i32 { g(n) }
+        g is function n as i32 returns i32 { f(n) }
+        result is f(1)
       `)).toThrow();
     });
   });
@@ -204,7 +204,7 @@ describe("Struct Extend (§3.2.2)", () => {
   it("adds new fields to a struct", () => {
     const r = evaluate(`
       base is { host is "localhost", port is 8080 }
-      extended is self.base extends { environment is "production" }
+      extended is base extends { environment is "production" }
     `);
     expect(r.extended).toEqual({
       host: "localhost",
@@ -216,7 +216,7 @@ describe("Struct Extend (§3.2.2)", () => {
   it("overrides existing fields and adds new ones", () => {
     const r = evaluate(`
       base is { host is "localhost", port is 8080 }
-      secure is self.base extends { port is 443, tls is true, cert is "/path" }
+      secure is base extends { port is 443, tls is true, cert is "/path" }
     `);
     expect(r.secure).toEqual({
       host: "localhost",
@@ -229,28 +229,28 @@ describe("Struct Extend (§3.2.2)", () => {
   it("rejects extends with no new fields", () => {
     expect(() => evaluate(`
       base is { x is 1, y is 2 }
-      alt is self.base extends { x is 10 }
+      alt is base extends { x is 10 }
     `)).toThrow(/new field/i);
   });
 
   it("rejects extends on non-struct", () => {
     expect(() => evaluate(`
       x is 42
-      result is self.x extends { a is 1 }
+      result is x extends { a is 1 }
     `)).toThrow(/struct/i);
   });
 
   it("rejects type-incompatible override in extends", () => {
     expect(() => evaluate(`
       base is { x is 1, y is 2 }
-      result is self.base extends { x is "hello", z is 3 }
+      result is base extends { x is "hello", z is 3 }
     `)).toThrow(/type/i);
   });
 
   it("override field with null is allowed", () => {
     const r = evaluate(`
       base is { x is 1, y is 2 }
-      result is self.base extends { x is null, z is 3 }
+      result is base extends { x is null, z is 3 }
     `);
     expect(r.result).toEqual({ x: null, y: 2n, z: 3n });
   });
@@ -343,7 +343,7 @@ describe("Standard Library (§5.16)", () => {
     it("maps a function over a list", () => {
       const r = evaluate(`
         numbers are 1, 2, 3, 4, 5
-        doubled is std.map(self.numbers, function n as i64 returns i64 { n * 2 })
+        doubled is std.map(numbers, function n as i64 returns i64 { n * 2 })
       `);
       expect(r.doubled).toEqual([2n, 4n, 6n, 8n, 10n]);
     });
@@ -353,7 +353,7 @@ describe("Standard Library (§5.16)", () => {
     it("filters a list", () => {
       const r = evaluate(`
         numbers are 1, 2, 3, 4, 5
-        evens is std.filter(self.numbers, function n as i64 returns bool { n % 2 is 0 })
+        evens is std.filter(numbers, function n as i64 returns bool { n % 2 is 0 })
       `);
       expect(r.evens).toEqual([2n, 4n]);
     });
@@ -363,7 +363,7 @@ describe("Standard Library (§5.16)", () => {
     it("sorts ascending", () => {
       const r = evaluate(`
         numbers are 5, 2, 8, 1, 9
-        ascending is std.sort(self.numbers, function a as i64, b as i64 returns bool { a < b })
+        ascending is std.sort(numbers, function a as i64, b as i64 returns bool { a < b })
       `);
       expect(r.ascending).toEqual([1n, 2n, 5n, 8n, 9n]);
     });
@@ -371,7 +371,7 @@ describe("Standard Library (§5.16)", () => {
     it("sorts descending", () => {
       const r = evaluate(`
         numbers are 5, 2, 8, 1, 9
-        descending is std.sort(self.numbers, function a as i64, b as i64 returns bool { a > b })
+        descending is std.sort(numbers, function a as i64, b as i64 returns bool { a > b })
       `);
       expect(r.descending).toEqual([9n, 8n, 5n, 2n, 1n]);
     });
@@ -385,7 +385,7 @@ describe("Standard Library (§5.16)", () => {
             called Entry
 
         by_score is std.sort(
-            self.entries,
+            entries,
             function a as Entry, b as Entry returns bool { a.score > b.score }
         )
       `);
@@ -403,7 +403,7 @@ describe("Standard Library (§5.16)", () => {
             called Item
 
         sorted is std.sort(
-            self.items,
+            items,
             function a as Item, b as Item returns bool { a.val < b.val }
         )
       `);
@@ -415,8 +415,8 @@ describe("Standard Library (§5.16)", () => {
     it("returns empty list for empty input", () => {
       const r = evaluate(`
         empty are "x" as [string]
-        empty2 is std.filter(self.empty, function s as string returns bool { false })
-        sorted is std.sort(self.empty2, function a as string, b as string returns bool { a < b })
+        empty2 is std.filter(empty, function s as string returns bool { false })
+        sorted is std.sort(empty2, function a as string, b as string returns bool { a < b })
       `);
       expect(r.sorted).toEqual([]);
     });
@@ -424,7 +424,7 @@ describe("Standard Library (§5.16)", () => {
     it("rejects non-bool comparator", () => {
       expect(() => evaluate(`
         numbers are 1, 2, 3
-        bad is std.sort(self.numbers, function a as i64, b as i64 returns i64 { a })
+        bad is std.sort(numbers, function a as i64, b as i64 returns i64 { a })
       `)).toThrow(/must return bool/);
     });
   });
@@ -433,7 +433,7 @@ describe("Standard Library (§5.16)", () => {
     it("reduces a list to a sum", () => {
       const r = evaluate(`
         numbers are 1, 2, 3, 4, 5
-        total is std.reduce(self.numbers, 0, function acc as i64, n as i64 returns i64 { acc + n })
+        total is std.reduce(numbers, 0, function acc as i64, n as i64 returns i64 { acc + n })
       `);
       expect(r.total).toBe(15n);
     });
@@ -548,7 +548,7 @@ describe("Function type registration and conformance (§3.8)", () => {
     const r = evaluate(`
       transform is function n as i64 returns i64 { n } called Transform
       identity is function n as i64 returns i64 { n } as Transform
-      result is self.identity(42)
+      result is identity(42)
     `);
     expect(r.result).toBe(42n);
   });
@@ -585,7 +585,7 @@ describe("Function type registration and conformance (§3.8)", () => {
     expect(() => evaluate(`
       a is function n as i32 returns i32 { n } called TypeA
       b is function n as i32 returns i32 { n } called TypeB
-      f is self.a as TypeB
+      f is a as TypeB
     `)).toThrow(/nominal identity/i);
   });
 });
@@ -594,21 +594,21 @@ describe("With/Extends chaining prevention", () => {
   it("rejects chained with expressions", () => {
     expect(() => evaluate(`
       base is { x is 1, y is 2 }
-      result is self.base with { x is 10 } with { y is 20 }
+      result is base with { x is 10 } with { y is 20 }
     `)).toThrow(/chaining/i);
   });
 
   it("rejects chained extends expressions", () => {
     expect(() => evaluate(`
       base is { x is 1 }
-      result is self.base extends { y is 2 } extends { z is 3 }
+      result is base extends { y is 2 } extends { z is 3 }
     `)).toThrow(/chaining/i);
   });
 
   it("rejects mixed with/extends chaining", () => {
     expect(() => evaluate(`
       base is { x is 1 }
-      result is self.base extends { y is 2 } with { x is 10 }
+      result is base extends { y is 2 } with { x is 10 }
     `)).toThrow(/chaining/i);
   });
 });
@@ -618,7 +618,7 @@ describe("Tagged union ordered comparison (§5.4)", () => {
     expect(() => evaluate(`
       a is 5 named high from high as i32, low as i32
       b is 3 named high from high as i32, low as i32
-      result is self.a < self.b
+      result is a < b
     `)).toThrow(/tagged union/i);
   });
 });
@@ -674,7 +674,7 @@ describe("List type annotation for non-numeric types (§3.4)", () => {
 describe("With on undefined base (§3.2.1)", () => {
   it("throws runtime error when with base is undefined", () => {
     expect(() => evaluate(`
-      result is self.nonexistent with { x is 1 }
+      result is nonexistent with { x is 1 }
     `)).toThrow(/undefined/i);
   });
 });
@@ -683,7 +683,7 @@ describe("Untagged union case rejection (§3.6)", () => {
   it("rejects case on untagged union", () => {
     expect(() => evaluate(`
       u is 42 from union i32, string
-      result is case self.u when 42 then "yes" else "no"
+      result is case u when 42 then "yes" else "no"
     `)).toThrow(/untagged union/i);
   });
 });
@@ -712,8 +712,8 @@ describe("With type preservation (§3.2.1)", () => {
   it("with preserves named struct type", () => {
     const r = evaluate(`
       base is { x is 0 as i32, y is 0 as i32 } called Point
-      p is self.base with { x is 10 }
-      q is self.p as Point
+      p is base with { x is 10 }
+      q is p as Point
     `);
     expect(r.q).toEqual({ x: 10n, y: 0n });
   });
@@ -733,7 +733,7 @@ describe("Enum variant inference in or else (§3.5)", () => {
   it("or else right operand resolves bare identifier as enum variant", () => {
     const r = evaluate(`
       color is red from red, green, blue called Color
-      result is self.color or else green
+      result is color or else green
     `);
     expect(r.result).toBeTruthy();
   });
@@ -765,19 +765,19 @@ describe("Numeric conversion overflow checks (§5.11)", () => {
 
 describe("and/or/not on undefined (§3.1)", () => {
   it("and with undefined is runtime error", () => {
-    expect(() => evaluate(`result is self.missing and true`)).toThrow(/undefined/i);
+    expect(() => evaluate(`result is missing and true`)).toThrow(/undefined/i);
   });
 
   it("or with undefined is runtime error", () => {
-    expect(() => evaluate(`result is self.missing or false`)).toThrow(/undefined/i);
+    expect(() => evaluate(`result is missing or false`)).toThrow(/undefined/i);
   });
 
   it("not with undefined is runtime error", () => {
-    expect(() => evaluate(`result is not self.missing`)).toThrow(/undefined/i);
+    expect(() => evaluate(`result is not missing`)).toThrow(/undefined/i);
   });
 
   it("and/or undefined in non-taken branch is suppressed", () => {
-    const r = evaluate(`result is if true then 42 else self.missing and true`);
+    const r = evaluate(`result is if true then 42 else missing and true`);
     expect(r.result).toBe(42n);
   });
 });
@@ -786,7 +786,7 @@ describe("Undefined as function argument (§3.1)", () => {
   it("undefined argument is a runtime error (suppressed in speculative eval)", () => {
     const r = evaluate(`
       f is function n as i32 returns i32 { n }
-      result is if true then 42 else self.f(self.missing)
+      result is if true then 42 else f(missing)
     `);
     expect(r.result).toBe(42n);
   });
@@ -794,7 +794,7 @@ describe("Undefined as function argument (§3.1)", () => {
   it("undefined argument in taken branch is an error", () => {
     expect(() => evaluate(`
       f is function n as i32 returns i32 { n }
-      result is self.f(self.missing)
+      result is f(missing)
     `)).toThrow(/undefined/i);
   });
 });
@@ -851,10 +851,10 @@ describe("Empty list type inference in if/case (§3.4)", () => {
     const r = evaluate(`
       items is [10, 20]
       x is 1
-      result is case self.x
+      result is case x
         when 1 then []
-        when 2 then self.items
-        else self.items
+        when 2 then items
+        else items
     `);
     expect(r.result).toEqual([]);
   });

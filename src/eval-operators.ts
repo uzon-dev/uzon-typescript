@@ -138,11 +138,11 @@ function evalIs(
   scope: Scope, exclude?: string,
 ): boolean {
   let left: UzonValue, right: UzonValue;
-  if (node.right.kind === "Identifier" && node.left.kind !== "Identifier") {
+  if (node.right.kind === "Identifier") {
     left = ctx.evalNode(node.left, scope, exclude);
     if (left instanceof UzonUnion) left = left.value;
     right = ctx.resolveEnumVariantOrEval(node.right, left, scope, exclude);
-  } else if (node.left.kind === "Identifier" && node.right.kind !== "Identifier") {
+  } else if (node.left.kind === "Identifier") {
     right = ctx.evalNode(node.right, scope, exclude);
     if (right instanceof UzonUnion) right = right.value;
     left = ctx.resolveEnumVariantOrEval(node.left, right, scope, exclude);
@@ -162,11 +162,11 @@ function evalIsNot(
   scope: Scope, exclude?: string,
 ): boolean {
   let left: UzonValue, right: UzonValue;
-  if (node.right.kind === "Identifier" && node.left.kind !== "Identifier") {
+  if (node.right.kind === "Identifier") {
     left = ctx.evalNode(node.left, scope, exclude);
     if (left instanceof UzonUnion) left = left.value;
     right = ctx.resolveEnumVariantOrEval(node.right, left, scope, exclude);
-  } else if (node.left.kind === "Identifier" && node.right.kind !== "Identifier") {
+  } else if (node.left.kind === "Identifier") {
     right = ctx.evalNode(node.right, scope, exclude);
     if (right instanceof UzonUnion) right = right.value;
     left = ctx.resolveEnumVariantOrEval(node.left, right, scope, exclude);

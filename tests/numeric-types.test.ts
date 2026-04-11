@@ -206,28 +206,28 @@ describe("Typed Numerics — Comprehensive Operations", () => {
 
   describe("String Interpolation", () => {
     it("interpolates typed ints and floats", () => {
-      expect(eval_('x is 42 as i32\ny is "val={self.x}"').y).toBe("val=42");
-      expect(eval_('x is 255 as u8\ny is "val={self.x}"').y).toBe("val=255");
-      expect(eval_('x is 3.14 as f32\ny is "val={self.x}"').y).toBe("val=3.14");
-      expect(eval_('x is inf as f64\ny is "val={self.x}"').y).toBe("val=inf");
+      expect(eval_('x is 42 as i32\ny is "val={x}"').y).toBe("val=42");
+      expect(eval_('x is 255 as u8\ny is "val={x}"').y).toBe("val=255");
+      expect(eval_('x is 3.14 as f32\ny is "val={x}"').y).toBe("val=3.14");
+      expect(eval_('x is inf as f64\ny is "val={x}"').y).toBe("val=inf");
     });
   });
 
   describe("Or Else", () => {
     it("undefined or else typed → typed returned", () => {
-      expect(eval_("x is self.missing or else (8080 as u16)").x).toBe(8080n);
+      expect(eval_("x is missing or else (8080 as u16)").x).toBe(8080n);
     });
 
     it("typed or else same → left returned", () => {
-      expect(eval_("a is 10 as i32\nx is self.a or else (0 as i32)").x).toBe(10n);
+      expect(eval_("a is 10 as i32\nx is a or else (0 as i32)").x).toBe(10n);
     });
 
     it("typed or else untyped → left returned", () => {
-      expect(eval_("a is 42 as i32\nx is self.a or else 0").x).toBe(42n);
+      expect(eval_("a is 42 as i32\nx is a or else 0").x).toBe(42n);
     });
 
     it("null or else typed → null passes through", () => {
-      expect(eval_("a is null\nx is self.a or else (0 as i32)").x).toBe(null);
+      expect(eval_("a is null\nx is a or else (0 as i32)").x).toBe(null);
     });
   });
 
@@ -250,7 +250,7 @@ describe("Typed Numerics — Comprehensive Operations", () => {
     it("case with typed branches", () => {
       const r = eval_(`
         x is 1 as i32
-        y is case self.x
+        y is case x
           when 1 as i32 then 10 as i32
           when 2 as i32 then 20 as i32
           else 0 as i32
@@ -273,7 +273,7 @@ describe("Typed Numerics — Comprehensive Operations", () => {
     it("list element access preserves type for arithmetic", () => {
       expect(eval_(`
         x is [10, 20, 30] as [i32]
-        y is self.x.first + (5 as i32)
+        y is x.first + (5 as i32)
       `).y).toBe(15n);
     });
 
@@ -281,33 +281,33 @@ describe("Typed Numerics — Comprehensive Operations", () => {
       expect(eval_(`
         a is [1, 2] as [i32]
         b is [3, 4] as [i32]
-        c is self.a ++ self.b
-        y is self.c.first + (10 as i32)
+        c is a ++ b
+        y is c.first + (10 as i32)
       `).y).toBe(11n);
     });
 
     it("list repetition preserves element type", () => {
       expect(eval_(`
         a is [1, 2] as [i32]
-        b is self.a ** 2
-        y is self.b.first + (10 as i32)
+        b is a ** 2
+        y is b.first + (10 as i32)
       `).y).toBe(11n);
     });
 
     it("in operator with typed list", () => {
       expect(eval_(`
         x is [10, 20, 30] as [i32]
-        y is (20 as i32) in self.x
+        y is (20 as i32) in x
       `).y).toBe(true);
 
       expect(eval_(`
         x is [10, 20, 30] as [i32]
-        y is 20 in self.x
+        y is 20 in x
       `).y).toBe(true);
 
       expect(eval_(`
         x is [10, 20, 30] as [i32]
-        y is 99 in self.x
+        y is 99 in x
       `).y).toBe(false);
     });
   });
@@ -316,14 +316,14 @@ describe("Typed Numerics — Comprehensive Operations", () => {
     it("tuple element access preserves type", () => {
       expect(eval_(`
         x is (10 as i32, "hello", 3.14 as f64)
-        y is self.x.first + (5 as i32)
+        y is x.first + (5 as i32)
       `).y).toBe(15n);
     });
 
     it("tuple third element typed float", () => {
       const r = eval_(`
         x is (1, 2, 3.14 as f64)
-        y is self.x.third + (0.86 as f64)
+        y is x.third + (0.86 as f64)
       `);
       expect(Math.abs((r.y as number) - 4.0)).toBeLessThan(0.001);
     });
@@ -333,8 +333,8 @@ describe("Typed Numerics — Comprehensive Operations", () => {
     it("struct field preserves type for arithmetic", () => {
       const r = eval_(`
         config is { port is 8080 as u16, timeout is 30 as u8 }
-        x is self.config.port + (1 as u16)
-        y is self.config.timeout + (10 as u8)
+        x is config.port + (1 as u16)
+        y is config.timeout + (10 as u8)
       `);
       expect(r.x).toBe(8081n);
       expect(r.y).toBe(40n);
@@ -343,14 +343,14 @@ describe("Typed Numerics — Comprehensive Operations", () => {
     it("struct field different types → arithmetic error", () => {
       throws(`
         config is { port is 8080 as u16, timeout is 30 as u8 }
-        x is self.config.port + self.config.timeout
+        x is config.port + config.timeout
       `, "same type");
     });
 
     it("nested struct field preserves type", () => {
       expect(eval_(`
         outer is { inner is { val is 42 as i32 } }
-        x is self.outer.inner.val + (8 as i32)
+        x is outer.inner.val + (8 as i32)
       `).x).toBe(50n);
     });
   });
@@ -359,38 +359,38 @@ describe("Typed Numerics — Comprehensive Operations", () => {
     it("same typed override", () => {
       expect(eval_(`
         config is { port is 8080 as u16 }
-        new_config is self.config with { port is 9090 as u16 }
-        x is self.new_config.port
+        new_config is config with { port is 9090 as u16 }
+        x is new_config.port
       `).x).toBe(9090n);
     });
 
     it("untyped literal adopts base field type", () => {
       expect(eval_(`
         config is { port is 8080 as u16 }
-        new_config is self.config with { port is 9090 }
-        x is self.new_config.port
+        new_config is config with { port is 9090 }
+        x is new_config.port
       `).x).toBe(9090n);
     });
 
     it("untyped literal overflow → runtime error", () => {
       throws(`
         config is { port is 8080 as u16 }
-        new_config is self.config with { port is 70000 }
+        new_config is config with { port is 70000 }
       `, "does not fit");
     });
 
     it("different typed override → type error", () => {
       throws(`
         config is { port is 8080 as u16 }
-        new_config is self.config with { port is 9090 as u32 }
+        new_config is config with { port is 9090 as u32 }
       `, "types must match");
     });
 
     it("with preserves type for subsequent arithmetic", () => {
       expect(eval_(`
         config is { port is 8080 as u16 }
-        new_config is self.config with { port is 9090 }
-        x is self.new_config.port + (10 as u16)
+        new_config is config with { port is 9090 }
+        x is new_config.port + (10 as u16)
       `).x).toBe(9100n);
     });
   });
@@ -399,25 +399,25 @@ describe("Typed Numerics — Comprehensive Operations", () => {
     it("if preserves numericType of taken branch", () => {
       expect(eval_(`
         x is if true then (42 as i32) else (0 as i32)
-        y is self.x + (8 as i32)
+        y is x + (8 as i32)
       `).y).toBe(50n);
     });
 
     it("case preserves numericType", () => {
       expect(eval_(`
         flag is true
-        x is case self.flag
+        x is case flag
           when true then 100 as u16
           else 0 as u16
-        y is self.x + (5 as u16)
+        y is x + (5 as u16)
       `).y).toBe(105n);
     });
 
     it("or else preserves type of left", () => {
       expect(eval_(`
         a is 42 as i32
-        x is self.a or else 0
-        y is self.x + (8 as i32)
+        x is a or else 0
+        y is x + (8 as i32)
       `).y).toBe(50n);
     });
 
@@ -425,8 +425,8 @@ describe("Typed Numerics — Comprehensive Operations", () => {
       expect(eval_(`
         a is 10 as i32
         b is 20 as i32
-        c is self.a + self.b
-        d is self.c * (2 as i32)
+        c is a + b
+        d is c * (2 as i32)
       `).d).toBe(60n);
     });
   });
@@ -513,7 +513,7 @@ describe("Typed Numerics — Comprehensive Operations", () => {
     it("binding reference is NOT adoptable (concrete i64)", () => {
       throws(`
         a is 7
-        x is self.a + (10 as u8)
+        x is a + (10 as u8)
       `, "same type");
     });
 
@@ -521,7 +521,7 @@ describe("Typed Numerics — Comprehensive Operations", () => {
       expect(eval_(`
         a is 7
         b is 8
-        x is self.a + self.b
+        x is a + b
       `).x).toBe(15n);
     });
 

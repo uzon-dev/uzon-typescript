@@ -665,9 +665,6 @@ export class Parser implements ParseContext {
         return { kind: "UndefinedLiteral", line: tok.line, col: tok.col };
       case TokenType.String:
         return parseStringLiteral(this);
-      case TokenType.Self:
-        this.advance();
-        return { kind: "SelfRef", line: tok.line, col: tok.col };
       case TokenType.Env:
         this.advance();
         return { kind: "EnvRef", line: tok.line, col: tok.col };

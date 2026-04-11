@@ -8,7 +8,7 @@
  *
  * Key design decisions (all bug fixes from the reference absorbed):
  * - Dependency graph + topological sort for binding evaluation order (§3.1)
- * - Self-exclusion: `self.x` returns undefined when `x` is being evaluated
+ * - Self-exclusion: lookups skip the binding currently being evaluated
  * - Adoptable numeric defaults: untyped literals are ~i64/~f64 until resolved
  * - Tagged union transparency: unwrap for operations, NOT for `with` (§3.7.1)
  * - Speculative branch evaluation: non-taken branches propagate type errors (§5.9)
@@ -320,8 +320,6 @@ export class Evaluator implements EvalContext {
       case "StringLiteral": return this.evalString(node.parts, scope, exclude, node);
       case "Identifier": return this.resolveIdentifier(node.name, node, scope, exclude);
 
-      case "SelfRef":
-        throw new UzonSyntaxError("'self' must be followed by .name", node.line, node.col);
       case "EnvRef":
         throw new UzonSyntaxError("'env' must be followed by .NAME", node.line, node.col);
 
@@ -409,12 +407,13 @@ export class Evaluator implements EvalContext {
     }
     if (scope) {
       const val = scope.get(name, exclude);
-      if (val !== UZON_UNDEFINED) return val;
+      if (val !== UZON_UNDEFINED) {
+        const nt = scope.getNumericType(name);
+        if (nt) this.numericType = nt;
+      }
+      return val;
     }
-    throw new UzonRuntimeError(
-      `Bare identifier '${name}' — use 'self.${name}' to reference a binding`,
-      node.line, node.col,
-    );
+    return UZON_UNDEFINED;
   }
 
   /**
@@ -440,12 +439,6 @@ export class Evaluator implements EvalContext {
     node: { kind: "MemberAccess"; object: AstNode; member: string; line: number; col: number },
     scope: Scope, exclude?: string,
   ): UzonValue {
-    if (node.object.kind === "SelfRef") {
-      const val = scope.get(node.member, exclude);
-      const nt = scope.getNumericType(node.member);
-      if (nt) this.numericType = nt;
-      return val;
-    }
     if (node.object.kind === "EnvRef") {
       const val = this.env[node.member];
       return val !== undefined ? val : UZON_UNDEFINED;
