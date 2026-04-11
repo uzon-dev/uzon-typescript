@@ -186,6 +186,9 @@ function evalIsNamed(
   scope: Scope, exclude?: string,
 ): boolean {
   const left = ctx.evalNode(node.left, scope, exclude);
+  if (left === UZON_UNDEFINED) {
+    throw new UzonRuntimeError("'is named' operand resolved to undefined", node.line, node.col);
+  }
   if (!(left instanceof UzonTaggedUnion)) {
     throw new UzonTypeError("'is named' can only be used with tagged unions", node.line, node.col);
   }
