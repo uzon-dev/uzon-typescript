@@ -5,7 +5,7 @@
  * UZON — typed, human-readable data expression format.
  *
  * Public API for parsing and serialising UZON documents.
- * See the UZON specification (v0.5) for the full language definition.
+ * See the UZON specification (v0.6) for the full language definition.
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
