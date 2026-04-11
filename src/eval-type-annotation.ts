@@ -56,6 +56,7 @@ export function evalTypeAnnotation(
         }
         elements.push(ctx.evalNode(elem, scope, exclude));
       }
+      ctx.listElementTypes.set(elements, node.type.inner!.path.join("."));
       return elements;
     }
   }
@@ -295,10 +296,13 @@ function annotateListType(
     ctx.listElementTypes.set(val, elemTypeName);
   } else if (elemTypeName === "bool") {
     validateListElements(val, "boolean", elemTypeName, "bool", node);
+    ctx.listElementTypes.set(val, elemTypeName);
   } else if (elemTypeName === "string") {
     validateListElements(val, "string", elemTypeName, "string", node);
+    ctx.listElementTypes.set(val, elemTypeName);
   } else {
     annotateListUserType(val, innerType, elemTypeName, scope, node);
+    ctx.listElementTypes.set(val, elemTypeName);
   }
   return val;
 }

@@ -49,7 +49,7 @@ import { evalOrElse, evalIf, evalCase } from "./eval-control.js";
 import { evalStructOverride, evalStructExtend } from "./eval-structs.js";
 import {
   typeCategory, typeTag, listElementCategory,
-  valueToString,
+  valueToString, typeExprToString,
 } from "./eval-helpers.js";
 
 // §5.12: Ordinal member access on lists/tuples
@@ -491,7 +491,7 @@ export class Evaluator implements EvalContext {
         const val = elements[idx];
         if (Array.isArray(obj)) {
           const nt = this.listElementTypes.get(obj);
-          if (nt) this.numericType = nt;
+          if (nt && /^[iuf]\d+$/.test(nt)) this.numericType = nt;
         }
         if (obj instanceof UzonTuple) {
           const types = this.tupleElementTypes.get(obj);
@@ -582,7 +582,7 @@ export class Evaluator implements EvalContext {
         throw new UzonTypeError("A tagged union must have at least two variants", node.line, node.col);
       }
       for (const [name, type] of node.variants) {
-        variants.set(name, type.isNull ? null : type.path.join("."));
+        variants.set(name, type.isNull ? null : typeExprToString(type));
       }
     } else if (node.value.kind === "TypeAnnotation") {
       // §6.3: Type reuse via as annotation

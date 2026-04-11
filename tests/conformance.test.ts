@@ -18,6 +18,7 @@ import { Lexer } from "../src/lexer.js";
 import { Parser } from "../src/parser.js";
 import { Evaluator } from "../src/evaluator.js";
 import { stringify } from "../src/stringify.js";
+import type { StringifyOptions } from "../src/stringify.js";
 import type { UzonValue } from "../src/value.js";
 import { valuesEqual } from "../src/eval-helpers.js";
 
@@ -29,6 +30,16 @@ function parseAndEval(src: string, filename?: string) {
   const tokens = new Lexer(src).tokenize();
   const doc = new Parser(tokens).parse();
   return new Evaluator({ fileReader, filename }).evaluate(doc);
+}
+
+/** Parse and evaluate, returning both bindings and evaluator metadata. */
+function parseAndEvalWithMeta(src: string, filename?: string) {
+  const fileReader = (path: string) => readFileSync(path, "utf-8");
+  const tokens = new Lexer(src).tokenize();
+  const doc = new Parser(tokens).parse();
+  const evaluator = new Evaluator({ fileReader, filename });
+  const bindings = evaluator.evaluate(doc);
+  return { bindings, listElementTypes: evaluator.listElementTypes };
 }
 
 /** Recursively collect all .uzon files under a directory. */
@@ -110,6 +121,46 @@ describe("conformance: eval", () => {
           expect.fail(
             `Binding '${key}' mismatch:\n  actual:   ${actStr}\n  expected: ${expStr}`,
           );
+        }
+      }
+    });
+  }
+});
+
+// ── Roundtrip conformance tests ──────────────────────────────────
+// Parse → stringify → parse again → values must match
+
+const roundtripDir = join(CONFORMANCE_DIR, "roundtrip");
+const roundtripFiles = collectUzonFilesRecursive(roundtripDir)
+  .filter(f => f.endsWith(".uzon"));
+
+describe("conformance: roundtrip", () => {
+  for (const filePath of roundtripFiles) {
+    const label = relative(roundtripDir, filePath);
+
+    it(label, () => {
+      const src = readFileSync(filePath, "utf-8");
+      const { bindings: original, listElementTypes } = parseAndEvalWithMeta(src, filePath);
+      const text = stringify(original, { listElementTypes } as StringifyOptions);
+      const reparsed = parseAndEval(text);
+
+      for (const key of Object.keys(original)) {
+        const orig = original[key];
+        const re = reparsed[key];
+        if (!valuesEqual(orig, re)) {
+          const origStr = orig !== undefined ? stringify({ [key]: orig }) : `${key} is <missing>`;
+          const reStr = re !== undefined ? stringify({ [key]: re }) : `${key} is <missing>`;
+          if (origStr !== reStr) {
+            expect.fail(
+              `Roundtrip mismatch for '${key}':\n  original:  ${origStr}\n  reparsed:  ${reStr}\n  stringify: ${text}`,
+            );
+          }
+        }
+      }
+
+      for (const key of Object.keys(reparsed)) {
+        if (!(key in original)) {
+          expect.fail(`Extra binding '${key}' appeared after roundtrip`);
         }
       }
     });

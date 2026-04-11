@@ -30,6 +30,9 @@ import {
 } from "./token.js";
 import { UzonSyntaxError } from "./error.js";
 
+/** Value-literal keywords that deserve a "did you mean" hint on case mismatch. */
+const CASE_HINT_KEYWORDS = new Set(["true", "false", "null", "inf", "nan", "undefined"]);
+
 const enum Mode {
   Normal,
   String,
@@ -599,6 +602,10 @@ export class Lexer {
       return;
     }
 
+    const lower = word.toLowerCase();
+    if (lower !== word && CASE_HINT_KEYWORDS.has(lower)) {
+      this.error(`'${word}' is not a keyword — did you mean '${lower}'?`, line, col);
+    }
     this.push(TokenType.Identifier, word, line, col);
   }
 

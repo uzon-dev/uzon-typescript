@@ -83,6 +83,10 @@ export class UzonTuple {
   get length(): number {
     return this.elements.length;
   }
+
+  [Symbol.iterator](): Iterator<UzonValue> {
+    return this.elements[Symbol.iterator]();
+  }
 }
 
 // ── Function (§3.8) ───────────────────────────────────────────────

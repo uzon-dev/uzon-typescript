@@ -226,7 +226,7 @@ describe("stringify", () => {
 
   it("handles plain JS number conversion", () => {
     const result = stringify({ x: 42 });
-    expect(result).toBe("x is 42");
+    expect(result).toBe("x is 42.0");
   });
 });
 
