@@ -38,6 +38,7 @@ export {
   UzonTuple,
   UzonFunction,
   formatUzonFloat,
+  displayValue,
 } from "./value.js";
 
 export type { UzonValue, UzonUndefined } from "./value.js";
@@ -84,6 +85,12 @@ export { watch } from "./watch.js";
 export type { WatchOptions } from "./watch.js";
 
 export { uzon } from "./builder.js";
+
+export {
+  withField, withoutField,
+  append, prepend, setAt, removeAt,
+  tupleSetAt,
+} from "./update.js";
 
 // ── Convenience API ─────────────────────────────────────────────
 
