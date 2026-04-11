@@ -65,6 +65,9 @@ export function evalFunctionCall(
   if (stdFn) return evalStdCall(ctx, stdFn, node.args, scope, exclude, node as AstNode);
 
   const callee = ctx.evalNode(node.callee, scope, exclude);
+  if (callee === UZON_UNDEFINED) {
+    throw new UzonRuntimeError("Cannot call undefined — callee resolved to undefined", node.line, node.col);
+  }
   if (!(callee instanceof UzonFunction)) {
     throw new UzonTypeError("Cannot call a non-function value", node.line, node.col);
   }

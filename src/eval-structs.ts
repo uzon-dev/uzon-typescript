@@ -49,7 +49,7 @@ export function evalStructOverride(
     const val = ctx.evalNode(field.value, scope, exclude);
     const overrideNumType = ctx.numericType;
     if (val === UZON_UNDEFINED) {
-      throw new UzonTypeError(
+      throw new UzonRuntimeError(
         `Override field '${field.name}' resolved to undefined — 'with' preserves struct shape`,
         field.line, field.col,
       );
@@ -185,7 +185,7 @@ export function evalStructExtend(
     const val = ctx.evalNode(field.value, scope, exclude);
     const overrideNumType = ctx.numericType;
     if (val === UZON_UNDEFINED) {
-      throw new UzonTypeError(`Field '${field.name}' in 'extends' resolved to undefined`, field.line, field.col);
+      throw new UzonRuntimeError(`Field '${field.name}' in 'extends' resolved to undefined`, field.line, field.col);
     }
     // Existing field override — same type compatibility rules as 'with'
     if (field.name in baseObj) {
