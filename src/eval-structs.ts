@@ -77,8 +77,8 @@ export function evalStructOverride(
           );
         }
         if (!actualOverride || overrideAdoptable) {
-          if (typeof val === "bigint") validateIntegerType(val, origNumType, field as unknown as AstNode);
-          if (typeof val === "number") validateFloatType(val, origNumType, field as unknown as AstNode);
+          if (typeof val === "bigint") validateIntegerType(val, origNumType, field);
+          if (typeof val === "number") validateFloatType(val, origNumType, field);
         }
       }
       // §3.2.1: Nested struct override must match shape
@@ -210,8 +210,8 @@ export function evalStructExtend(
             );
           }
           if (!actualOverride || overrideAdoptable) {
-            if (typeof val === "bigint") validateIntegerType(val, origNumType, field as unknown as AstNode);
-            if (typeof val === "number") validateFloatType(val, origNumType, field as unknown as AstNode);
+            if (typeof val === "bigint") validateIntegerType(val, origNumType, field);
+            if (typeof val === "number") validateFloatType(val, origNumType, field);
           }
         }
       }
