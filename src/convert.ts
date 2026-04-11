@@ -42,6 +42,63 @@ function describeType(value: UzonValue): string {
   return "struct";
 }
 
+// ── Type guards ─────────────────────────────────────────────────
+
+export function isNull(value: UzonValue): value is null {
+  return value === null;
+}
+
+export function isUndefined(value: UzonValue): value is typeof UZON_UNDEFINED {
+  return value === UZON_UNDEFINED;
+}
+
+export function isBool(value: UzonValue): value is boolean {
+  return typeof value === "boolean";
+}
+
+export function isInteger(value: UzonValue): value is bigint {
+  return typeof value === "bigint";
+}
+
+export function isFloat(value: UzonValue): value is number {
+  return typeof value === "number";
+}
+
+export function isNumber(value: UzonValue): value is number | bigint {
+  return typeof value === "number" || typeof value === "bigint";
+}
+
+export function isString(value: UzonValue): value is string {
+  return typeof value === "string";
+}
+
+export function isList(value: UzonValue): value is UzonValue[] {
+  return Array.isArray(value);
+}
+
+export function isTuple(value: UzonValue): value is UzonTuple {
+  return value instanceof UzonTuple;
+}
+
+export function isEnum(value: UzonValue): value is UzonEnum {
+  return value instanceof UzonEnum;
+}
+
+export function isUnion(value: UzonValue): value is UzonUnion {
+  return value instanceof UzonUnion;
+}
+
+export function isTaggedUnion(value: UzonValue): value is UzonTaggedUnion {
+  return value instanceof UzonTaggedUnion;
+}
+
+export function isStruct(value: UzonValue): value is Record<string, UzonValue> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    && !(value instanceof UzonEnum) && !(value instanceof UzonUnion)
+    && !(value instanceof UzonTaggedUnion) && !(value instanceof UzonTuple)
+    && !(value instanceof UzonFunction);
+}
+
 // ── Narrowing helpers ───────────────────────────────────────────
 
 /**
@@ -131,4 +188,38 @@ export function asEnum(value: UzonValue): UzonEnum {
   const v = unwrap(value);
   if (v instanceof UzonEnum) return v;
   throw new TypeError(`Expected an enum, got ${describeType(value)}`);
+}
+
+// ── Optional helpers (return undefined instead of throwing) ─────
+
+export function optionalNumber(value: UzonValue): number | undefined {
+  try { return asNumber(value); } catch { return undefined; }
+}
+
+export function optionalInteger(value: UzonValue): bigint | undefined {
+  try { return asInteger(value); } catch { return undefined; }
+}
+
+export function optionalString(value: UzonValue): string | undefined {
+  try { return asString(value); } catch { return undefined; }
+}
+
+export function optionalBool(value: UzonValue): boolean | undefined {
+  try { return asBool(value); } catch { return undefined; }
+}
+
+export function optionalList(value: UzonValue): UzonValue[] | undefined {
+  try { return asList(value); } catch { return undefined; }
+}
+
+export function optionalTuple(value: UzonValue): UzonTuple | undefined {
+  try { return asTuple(value); } catch { return undefined; }
+}
+
+export function optionalStruct(value: UzonValue): Record<string, UzonValue> | undefined {
+  try { return asStruct(value); } catch { return undefined; }
+}
+
+export function optionalEnum(value: UzonValue): UzonEnum | undefined {
+  try { return asEnum(value); } catch { return undefined; }
 }

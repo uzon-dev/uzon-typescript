@@ -60,9 +60,28 @@ export { stringify, stringifyValue, toJS } from "./stringify.js";
 export type { StringifyOptions, ToJSOptions } from "./stringify.js";
 
 export {
+  // Type guards
+  isNull, isUndefined, isBool, isInteger, isFloat, isNumber,
+  isString, isList, isTuple, isEnum, isUnion, isTaggedUnion, isStruct,
+  // Type narrowing
   asNumber, asInteger, asString, asBool,
   asList, asTuple, asStruct, asEnum,
+  // Optional (safe) access
+  optionalNumber, optionalInteger, optionalString, optionalBool,
+  optionalList, optionalTuple, optionalStruct, optionalEnum,
 } from "./convert.js";
+
+export { get, getOrThrow } from "./access.js";
+
+export { match } from "./match.js";
+
+export { toJSON, fromJSON } from "./json.js";
+export type { ToJSONOptions } from "./json.js";
+
+export { merge, mergeValues } from "./merge.js";
+
+export { watch } from "./watch.js";
+export type { WatchOptions } from "./watch.js";
 
 // ── Convenience API ─────────────────────────────────────────────
 
