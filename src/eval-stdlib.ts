@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: © 2026 Suho Kang
 // SPDX-License-Identifier: MIT
 /**
- * Standard library — 16 built-in functions (§5.16).
+ * Standard library — 18 built-in functions (§5.16).
  *
  * All std.* functions are dispatched through evalStdCall, which delegates
  * to individual implementations. Each function receives a EvalContext
@@ -69,7 +69,7 @@ function isStruct(val: UzonValue): val is Record<string, UzonValue> {
 function stdLen(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
   expectArgs(argNodes, 1, "len", node);
   const val = ctx.evalNode(argNodes[0], scope, exclude);
-  if (typeof val === "string") { ctx.numericType = "i64"; return BigInt(val.length); }
+  if (typeof val === "string") { ctx.numericType = "i64"; return BigInt([...val].length); }
   if (Array.isArray(val)) { ctx.numericType = "i64"; return BigInt(val.length); }
   if (val instanceof UzonTuple) { ctx.numericType = "i64"; return BigInt(val.length); }
   if (isStruct(val)) { ctx.numericType = "i64"; return BigInt(Object.keys(val).length); }
