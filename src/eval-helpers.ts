@@ -37,6 +37,11 @@ export function valuesEqual(a: UzonValue, b: UzonValue): boolean {
     if (!a.typeName && !b.typeName) return a.value === b.value;
     return false;
   }
+  if (a instanceof UzonUnion && b instanceof UzonUnion) {
+    if (a.typeName && b.typeName && a.typeName !== b.typeName) return false;
+    if (!a.typeName !== !b.typeName) return false;
+    return valuesEqual(a.value, b.value);
+  }
   if (a instanceof UzonTaggedUnion && b instanceof UzonTaggedUnion) {
     return a.tag === b.tag && valuesEqual(a.value, b.value);
   }

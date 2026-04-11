@@ -22,11 +22,22 @@ export interface StringifyOptions {
   indent?: string;
   /** Use multiline format for structs with more than this many fields (default: 1) */
   multilineThreshold?: number;
+  /** Map from list arrays to their element type names (from Evaluator) */
+  listElementTypes?: WeakMap<UzonValue[], string>;
 }
 
 export interface ToJSOptions {
   /** How to convert bigint values (default: "number") */
   bigint?: "number" | "bigint" | "string";
+}
+
+// ── Internal context ─────────────────────────────────────────────
+
+interface StringifyCtx {
+  indent: string;
+  mt: number;
+  emittedTypes: Set<string>;
+  listElementTypes: WeakMap<UzonValue[], string>;
 }
 
 // ── Keyword set for identifier escaping ──────────────────────────
@@ -56,6 +67,7 @@ function escapeIdentifier(name: string): string {
 function stringifyString(s: string): string {
   const escaped = s
     .replace(/\\/g, "\\\\")
+    .replace(/\0/g, "\\0")
     .replace(/"/g, '\\"')
     .replace(/\{/g, "\\{")
     .replace(/\n/g, "\\n")
@@ -68,33 +80,107 @@ function stringifyString(s: string): string {
 
 /**
  * Normalise a value for stringification.
- * Passes through UzonValue types unchanged; converts plain JS numbers
- * (integer → bigint) so stringifyValue formats them correctly.
+ * Passes through UzonValue types unchanged. Plain JS numbers stay as
+ * floats (use BigInt for integers). Preserves array/object identity
+ * when no elements change, so WeakMap lookups remain valid.
  */
 function normalizeValue(value: any): UzonValue {
   if (value === null) return null;
   if (typeof value === "boolean") return value;
   if (typeof value === "bigint") return value;
-  if (typeof value === "number") {
-    if (Number.isNaN(value) || !Number.isFinite(value)) return value;
-    if (Number.isInteger(value)) return BigInt(value);
-    return value;
-  }
+  if (typeof value === "number") return value;
   if (typeof value === "string") return value;
   if (value instanceof UzonEnum) return value;
   if (value instanceof UzonUnion) return value;
   if (value instanceof UzonTaggedUnion) return value;
   if (value instanceof UzonTuple) return value;
   if (value instanceof UzonFunction) return value;
-  if (Array.isArray(value)) return value.map(normalizeValue);
+  if (Array.isArray(value)) {
+    let changed = false;
+    const result = value.map((e: any) => {
+      const n = normalizeValue(e);
+      if (n !== e) changed = true;
+      return n;
+    });
+    return changed ? result : value;
+  }
   if (typeof value === "object") {
+    let changed = false;
     const result: Record<string, UzonValue> = {};
     for (const [k, v] of Object.entries(value)) {
-      result[k] = normalizeValue(v);
+      const n = normalizeValue(v);
+      if (n !== v) changed = true;
+      result[k] = n;
     }
-    return result;
+    return changed ? result : value;
   }
   throw new Error(`Cannot convert ${typeof value} to UZON`);
+}
+
+// ── Type collection ──────────────────────────────────────────────
+
+function getTypeName(value: UzonValue): string | null {
+  if (value instanceof UzonEnum) return value.typeName;
+  if (value instanceof UzonUnion) return value.typeName;
+  if (value instanceof UzonTaggedUnion) return value.typeName;
+  return null;
+}
+
+/** Recursively collect all named types from a value tree. */
+function collectTypes(
+  value: UzonValue,
+  types: Map<string, UzonEnum | UzonUnion | UzonTaggedUnion>,
+): void {
+  if (value instanceof UzonEnum) {
+    if (value.typeName && !types.has(value.typeName)) types.set(value.typeName, value);
+  } else if (value instanceof UzonUnion) {
+    if (value.typeName && !types.has(value.typeName)) types.set(value.typeName, value);
+    collectTypes(value.value, types);
+  } else if (value instanceof UzonTaggedUnion) {
+    if (value.typeName && !types.has(value.typeName)) types.set(value.typeName, value);
+    collectTypes(value.value, types);
+  } else if (value instanceof UzonTuple) {
+    for (const e of value.elements) collectTypes(e, types);
+  } else if (Array.isArray(value)) {
+    for (const e of value) collectTypes(e, types);
+  } else if (typeof value === "object" && value !== null
+      && !(value instanceof UzonFunction)) {
+    for (const v of Object.values(value as Record<string, UzonValue>)) {
+      collectTypes(v, types);
+    }
+  }
+}
+
+/** Generate a synthetic type definition binding. */
+function emitTypeDefinition(
+  typeName: string, typeValue: UzonEnum | UzonUnion | UzonTaggedUnion,
+  ctx: StringifyCtx,
+): string {
+  const bName = escapeIdentifier(`_${typeName}`);
+  if (typeValue instanceof UzonEnum) {
+    const escapedVariants = typeValue.variants.map((v: string) =>
+      ALL_KEYWORDS.has(v) ? `@${v}` : v,
+    );
+    return `${bName} is ${escapeIdentifier(typeValue.variants[0])} from ${escapedVariants.join(", ")} called ${typeName}`;
+  }
+  if (typeValue instanceof UzonTaggedUnion) {
+    const firstEntry = [...typeValue.variants.entries()][0];
+    const [firstTag, firstType] = firstEntry;
+    let defaultValue: string;
+    if (firstType === null || firstType === "null") defaultValue = "null";
+    else if (firstType === "string") defaultValue = '""';
+    else if (firstType === "bool") defaultValue = "false";
+    else if (/^[iu]\d+$/.test(firstType)) defaultValue = "0";
+    else if (/^f\d+$/.test(firstType)) defaultValue = "0.0";
+    else defaultValue = "null";
+    const variants = [...typeValue.variants.entries()]
+      .map(([k, v]) => `${k} as ${v ?? "null"}`)
+      .join(", ");
+    return `${bName} is ${defaultValue} named ${firstTag} from ${variants} called ${typeName}`;
+  }
+  // UzonUnion
+  const inner = stringifyValueImpl(typeValue.value, ctx, 0);
+  return `${bName} is ${inner} from union ${typeValue.types.join(", ")} called ${typeName}`;
 }
 
 // ── stringify ───────────────────────────────────────────────────
@@ -107,19 +193,52 @@ export function stringify(
   bindings: Record<string, any>,
   options: StringifyOptions = {},
 ): string {
-  const indent = options.indent ?? "    ";
-  const threshold = options.multilineThreshold ?? 1;
+  const ctx: StringifyCtx = {
+    indent: options.indent ?? "    ",
+    mt: options.multilineThreshold ?? 1,
+    emittedTypes: new Set(),
+    listElementTypes: options.listElementTypes ?? new WeakMap(),
+  };
+
+  // Normalize all values (preserving array/object identity)
+  const entries: [string, UzonValue][] = [];
+  for (const [k, v] of Object.entries(bindings)) {
+    entries.push([k, normalizeValue(v)]);
+  }
+
+  // Collect all types used anywhere in the value tree
+  const allTypes = new Map<string, UzonEnum | UzonUnion | UzonTaggedUnion>();
+  for (const [, value] of entries) collectTypes(value, allTypes);
+
+  // Find which types are direct top-level binding values
+  const topLevelTypes = new Set<string>();
+  for (const [, value] of entries) {
+    const tn = getTypeName(value);
+    if (tn) topLevelTypes.add(tn);
+  }
 
   const lines: string[] = [];
-  for (const [name, value] of Object.entries(bindings)) {
-    const eName = escapeIdentifier(name);
-    const uVal = normalizeValue(value);
-    lines.push(`${eName} is ${stringifyValue(uVal, indent, threshold, 0)}`);
+
+  // Emit synthetic definitions for types only found in nested positions
+  for (const [typeName, typeValue] of allTypes) {
+    if (!topLevelTypes.has(typeName)) {
+      lines.push(emitTypeDefinition(typeName, typeValue, ctx));
+      ctx.emittedTypes.add(typeName);
+    }
   }
+
+  // Emit actual bindings
+  for (const [name, value] of entries) {
+    const eName = escapeIdentifier(name);
+    lines.push(`${eName} is ${stringifyValueImpl(value, ctx, 0)}`);
+    const tn = getTypeName(value);
+    if (tn) ctx.emittedTypes.add(tn);
+  }
+
   return lines.join("\n");
 }
 
-// ── stringifyValue ──────────────────────────────────────────────
+// ── stringifyValue (public API) ─────────────────────────────────
 
 /**
  * Convert a single value to its UZON text representation.
@@ -131,19 +250,30 @@ export function stringifyValue(
   multilineThreshold: number = 1,
   depth: number = 0,
 ): string {
+  const ctx: StringifyCtx = {
+    indent, mt: multilineThreshold,
+    emittedTypes: new Set(),
+    listElementTypes: new WeakMap(),
+  };
+  return stringifyValueImpl(normalizeValue(value), ctx, depth);
+}
+
+// ── stringifyValueImpl (internal) ───────────────────────────────
+
+function stringifyValueImpl(value: UzonValue, ctx: StringifyCtx, depth: number): string {
   if (value === UZON_UNDEFINED) throw new Error("Cannot stringify undefined UZON value");
   if (value === null) return "null";
   if (typeof value === "boolean") return value ? "true" : "false";
   if (typeof value === "bigint") return value.toString();
   if (typeof value === "number") return stringifyNumber(value);
   if (typeof value === "string") return stringifyString(value);
-  if (value instanceof UzonEnum) return stringifyEnum(value);
-  if (value instanceof UzonUnion) return stringifyUnion(value, indent, multilineThreshold, depth);
-  if (value instanceof UzonTaggedUnion) return stringifyTaggedUnion(value, indent, multilineThreshold, depth);
+  if (value instanceof UzonEnum) return stringifyEnumImpl(value, ctx);
+  if (value instanceof UzonUnion) return stringifyUnionImpl(value, ctx, depth);
+  if (value instanceof UzonTaggedUnion) return stringifyTaggedUnionImpl(value, ctx, depth);
   if (value instanceof UzonFunction) throw new Error("Cannot stringify function values — functions are not serializable");
-  if (value instanceof UzonTuple) return stringifyTuple(value, indent, multilineThreshold, depth);
-  if (Array.isArray(value)) return stringifyList(value, indent, multilineThreshold, depth);
-  if (typeof value === "object") return stringifyStruct(value, indent, multilineThreshold, depth);
+  if (value instanceof UzonTuple) return stringifyTupleImpl(value, ctx, depth);
+  if (Array.isArray(value)) return stringifyListImpl(value, ctx, depth);
+  if (typeof value === "object") return stringifyStructImpl(value, ctx, depth);
   throw new Error(`Cannot stringify value: ${value}`);
 }
 
@@ -154,73 +284,98 @@ function stringifyNumber(value: number): string {
   return formatUzonFloat(value);
 }
 
-// §3.5: Enum — `variant from var1, var2, ... [called TypeName]`
-function stringifyEnum(value: UzonEnum): string {
+// §3.5: Enum
+function stringifyEnumImpl(value: UzonEnum, ctx: StringifyCtx): string {
+  if (value.typeName && ctx.emittedTypes.has(value.typeName)) {
+    return `${escapeIdentifier(value.value)} as ${value.typeName}`;
+  }
   const escapedVariants = value.variants.map((v: string) =>
     ALL_KEYWORDS.has(v) ? `@${v}` : v,
   );
   let result = `${escapeIdentifier(value.value)} from ${escapedVariants.join(", ")}`;
-  if (value.typeName) result += ` called ${value.typeName}`;
+  if (value.typeName) {
+    result += ` called ${value.typeName}`;
+    ctx.emittedTypes.add(value.typeName);
+  }
   return result;
 }
 
-// §3.6: Untagged union — `value from union Type1, Type2, ...`
-function stringifyUnion(value: UzonUnion, indent: string, mt: number, depth: number): string {
-  const inner = stringifyValue(value.value, indent, mt, depth);
+// §3.6: Untagged union
+function stringifyUnionImpl(value: UzonUnion, ctx: StringifyCtx, depth: number): string {
+  const inner = stringifyValueImpl(value.value, ctx, depth);
+  if (value.typeName && ctx.emittedTypes.has(value.typeName)) {
+    return `${inner} as ${value.typeName}`;
+  }
   let result = `${inner} from union ${value.types.join(", ")}`;
-  if (value.typeName) result += ` called ${value.typeName}`;
+  if (value.typeName) {
+    result += ` called ${value.typeName}`;
+    ctx.emittedTypes.add(value.typeName);
+  }
   return result;
 }
 
-// §3.7: Tagged union — `value named tag from var1 as T1, ... [called TypeName]`
-function stringifyTaggedUnion(value: UzonTaggedUnion, indent: string, mt: number, depth: number): string {
-  const inner = stringifyValue(value.value, indent, mt, depth);
-  const allHaveTypes = value.variants.size > 0
-    && [...value.variants.values()].every(v => v !== null);
+// §3.7: Tagged union
+function stringifyTaggedUnionImpl(value: UzonTaggedUnion, ctx: StringifyCtx, depth: number): string {
+  const inner = stringifyValueImpl(value.value, ctx, depth);
+  if (value.typeName && ctx.emittedTypes.has(value.typeName)) {
+    return `${inner} as ${value.typeName} named ${value.tag}`;
+  }
+  // Full definition — always emit variant types
+  const variants = [...value.variants.entries()]
+    .map(([k, v]) => `${k} as ${v ?? "null"}`)
+    .join(", ");
   let result: string;
-  if (allHaveTypes) {
-    const variants = [...value.variants.entries()]
-      .map(([k, v]) => `${k} as ${v}`)
-      .join(", ");
+  if (value.variants.size > 0) {
     result = `${inner} named ${value.tag} from ${variants}`;
   } else {
     result = `${inner} named ${value.tag}`;
   }
-  if (value.typeName) result += ` called ${value.typeName}`;
+  if (value.typeName) {
+    result += ` called ${value.typeName}`;
+    ctx.emittedTypes.add(value.typeName);
+  }
   return result;
 }
 
-// §3.3: Tuple — `(elem1, elem2)` with trailing comma for single-element
-function stringifyTuple(value: UzonTuple, indent: string, mt: number, depth: number): string {
+// §3.3: Tuple
+function stringifyTupleImpl(value: UzonTuple, ctx: StringifyCtx, depth: number): string {
   if (value.elements.length === 0) return "()";
   if (value.elements.length === 1) {
-    return `(${stringifyValue(value.elements[0], indent, mt, depth)},)`;
+    return `(${stringifyValueImpl(value.elements[0], ctx, depth)},)`;
   }
-  const elems = value.elements.map((e: UzonValue) => stringifyValue(e, indent, mt, depth));
+  const elems = value.elements.map((e: UzonValue) => stringifyValueImpl(e, ctx, depth));
   return `(${elems.join(", ")})`;
 }
 
-// §3.4: List — `[ elem1, elem2, ... ]`
-function stringifyList(value: UzonValue[], indent: string, mt: number, depth: number): string {
-  if (value.length === 0) return "[]";
-  const elems = value.map((e: UzonValue) => stringifyValue(e, indent, mt, depth + 1));
-  return `[ ${elems.join(", ")} ]`;
+// §3.4: List
+function stringifyListImpl(value: UzonValue[], ctx: StringifyCtx, depth: number): string {
+  const elemType = ctx.listElementTypes.get(value);
+  if (value.length === 0) {
+    if (elemType) return `[] as [${elemType}]`;
+    return "[]";
+  }
+  const elems = value.map((e: UzonValue) => stringifyValueImpl(e, ctx, depth + 1));
+  const result = `[ ${elems.join(", ")} ]`;
+  if (elemType && value.every(e => e === null)) {
+    return `${result} as [${elemType}]`;
+  }
+  return result;
 }
 
-// §3.2: Struct — inline or multiline based on field count
-function stringifyStruct(value: Record<string, any>, indent: string, mt: number, depth: number): string {
+// §3.2: Struct
+function stringifyStructImpl(value: Record<string, any>, ctx: StringifyCtx, depth: number): string {
   const entries = Object.entries(value);
   if (entries.length === 0) return "{}";
-  if (entries.length <= mt) {
+  if (entries.length <= ctx.mt) {
     const fields = entries.map(([k, v]) =>
-      `${escapeIdentifier(k)} is ${stringifyValue(v, indent, mt, depth + 1)}`,
+      `${escapeIdentifier(k)} is ${stringifyValueImpl(v, ctx, depth + 1)}`,
     );
     return `{ ${fields.join(", ")} }`;
   }
-  const pad = indent.repeat(depth + 1);
-  const closePad = indent.repeat(depth);
+  const pad = ctx.indent.repeat(depth + 1);
+  const closePad = ctx.indent.repeat(depth);
   const fields = entries.map(([k, v]) =>
-    `${pad}${escapeIdentifier(k)} is ${stringifyValue(v, indent, mt, depth + 1)}`,
+    `${pad}${escapeIdentifier(k)} is ${stringifyValueImpl(v, ctx, depth + 1)}`,
   );
   return `{\n${fields.join("\n")}\n${closePad}}`;
 }
