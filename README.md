@@ -942,6 +942,48 @@ class Scope {
 }
 ```
 
+#### `TypeDef`
+
+Type definition stored in a `Scope`. Used by the evaluator for type checking and annotation resolution.
+
+```typescript
+interface TypeDef {
+  kind: "enum" | "union" | "tagged_union" | "struct" | "list" | "primitive" | "function";
+  name: string;
+  variants?: string[];                     // Enum variant names
+  variantTypes?: Map<string, string>;      // Tagged union: tag → payload type
+  memberTypes?: string[];                  // Union member type names
+  fields?: Map<string, string>;            // Struct: field → type tag
+  fieldAnnotations?: Map<string, string>;  // Struct: per-field type annotations
+  elementType?: string;                    // List element type
+  paramTypes?: string[];                   // Function parameter types
+  returnType?: string;                     // Function return type
+}
+```
+
+#### AST Types
+
+```typescript
+// Top-level document
+interface DocumentNode { kind: "Document"; bindings: BindingNode[]; line: number; col: number; }
+
+// A named binding: `name is value`
+interface BindingNode { kind: "Binding"; name: string; value: AstNode; line: number; col: number; }
+
+// All binary operators
+type BinaryOp =
+  | "+" | "-" | "*" | "/" | "%" | "^" | "++" | "**"
+  | "<" | "<=" | ">" | ">="
+  | "and" | "or"
+  | "is" | "is not" | "is named" | "is not named"
+  | "in";
+
+// AstNode is a discriminated union of all expression node types
+type AstNode = IntegerLiteralNode | FloatLiteralNode | StringLiteralNode | BoolLiteralNode
+  | NullLiteralNode | IdentifierNode | BinaryOpNode | UnaryOpNode | IfExprNode
+  | StructLiteralNode | ListLiteralNode | TupleLiteralNode | /* ... and more */;
+```
+
 #### `TokenType` (enum)
 
 Covers all UZON token types: `Integer`, `Float`, `String`, `True`, `False`, `Null`, `Identifier`, `Is`, `From`, `Called`, `As`, `Named`, `With`, `Plus`, `Minus`, `Star`, `Slash`, `LBrace`, `RBrace`, `LBracket`, `RBracket`, `LParen`, `RParen`, `Comma`, `Dot`, `Newline`, `Eof`, and more.
