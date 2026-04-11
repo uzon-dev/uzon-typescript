@@ -18,8 +18,8 @@
  */
 
 import type {
-  AstNode, BindingNode, DocumentNode, TypeExprNode,
-  StringPart,
+  AstNode, BindingNode, DocumentNode, StructLiteralNode,
+  TypeExprNode, StringPart,
 } from "./ast.js";
 import {
   UZON_UNDEFINED, UzonEnum, UzonUnion, UzonTaggedUnion, UzonTuple, UzonFunction,
@@ -281,7 +281,7 @@ export class Evaluator implements EvalContext {
     if (val !== null && typeof val === "object" && !Array.isArray(val)
         && !(val instanceof UzonEnum) && !(val instanceof UzonUnion)
         && !(val instanceof UzonTaggedUnion) && !(val instanceof UzonTuple)
-        && !(val instanceof UzonFunction) && (val as any) !== UZON_UNDEFINED) {
+        && !(val instanceof UzonFunction)) {
       const existing = this.structScopes.get(val as Record<string, UzonValue>)
         ?? this.getImportScope(val as Record<string, UzonValue>);
       if (existing) {
@@ -817,9 +817,9 @@ export class Evaluator implements EvalContext {
       }
       const fieldAnnotations = new Map<string, string>();
       if (valueNode.kind === "StructLiteral") {
-        for (const field of (valueNode as any).fields) {
-          if (field.value?.kind === "TypeAnnotation") {
-            const typePath = (field.value as any).type.path.join(".");
+        for (const field of (valueNode as StructLiteralNode).fields) {
+          if (field.value.kind === "TypeAnnotation") {
+            const typePath = field.value.type.path.join(".");
             fieldAnnotations.set(field.name, typePath);
           }
         }

@@ -8,7 +8,7 @@
  * and type compatibility checks for arithmetic and comparison operations.
  */
 
-import type { AstNode } from "./ast.js";
+import type { NodeBase } from "./ast.js";
 import { UzonRuntimeError, UzonTypeError } from "./error.js";
 import type { UzonValue } from "./value.js";
 
@@ -22,7 +22,7 @@ const FLOAT_MAX: Record<string, number> = {
 
 // ── Validation ──
 
-export function validateIntegerType(val: bigint, typeName: string, node: AstNode): void {
+export function validateIntegerType(val: bigint, typeName: string, node: NodeBase): void {
   const match = typeName.match(/^([iu])(\d+)$/);
   if (!match) return;
   const signed = match[1] === "i";
@@ -47,7 +47,7 @@ export function validateIntegerType(val: bigint, typeName: string, node: AstNode
   }
 }
 
-export function validateFloatType(val: number, typeName: string, node: AstNode): void {
+export function validateFloatType(val: number, typeName: string, node: NodeBase): void {
   if (!Number.isFinite(val)) return;
   const maxVal = FLOAT_MAX[typeName];
   if (maxVal !== undefined && Math.abs(val) > maxVal) {
@@ -91,7 +91,7 @@ export function typeNameCategory(typeName: string): string | null {
  */
 export function resolveNumericTypes(
   leftType: string | null, rightType: string | null,
-  left: UzonValue, right: UzonValue, node: AstNode,
+  left: UzonValue, right: UzonValue, node: NodeBase,
 ): string | null {
   const la = actualType(leftType);
   const ra = actualType(rightType);
