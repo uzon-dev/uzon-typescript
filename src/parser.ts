@@ -511,7 +511,7 @@ export class Parser implements ParseContext {
       }
     }
 
-    // §3.7: `named tag from ...` — tagged union
+    // §3.7: `named tag from ...` or `named tag as Type` — tagged union
     if (this.peek().type === TokenType.Named) {
       const namedTok = this.advance();
       this.skipNewlines();
@@ -523,6 +523,14 @@ export class Parser implements ParseContext {
       if (this.peek().type === TokenType.From) {
         this.advance();
         variantDefs = this.parseTaggedUnionVariants();
+      } else if (this.peek().type === TokenType.As) {
+        // §6.3: `named tag as TypeName` — reuse existing type definition
+        const asTok = this.advance();
+        const type = this.parseTypeExpr();
+        expr = {
+          kind: "TypeAnnotation", expr,
+          type, line: asTok.line, col: asTok.col,
+        } as AstNode;
       }
 
       expr = { kind: "NamedVariant", value: expr, tag, variants: variantDefs, line: namedTok.line, col: namedTok.col };

@@ -212,6 +212,9 @@ export function formatUzonFloat(value: number): string {
     return "nan";
   }
 
+  // §5.11.2: negative zero must preserve sign
+  if (Object.is(value, -0)) return "-0.0";
+
   // Use JavaScript's toPrecision to get shortest round-trip form.
   // We rely on V8/SpiderMonkey producing correct round-trip strings.
   let s = String(value);

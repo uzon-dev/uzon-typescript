@@ -81,6 +81,16 @@ export function typeNameCategory(typeName: string): string | null {
 
 // ── Type resolution for binary operations ──
 
+/** Whether a type name is a float type. */
+function isFloatType(t: string): boolean {
+  return /^f\d+$/.test(t);
+}
+
+/** Whether a type name is an integer type. */
+function isIntType(t: string): boolean {
+  return /^[iu]\d+$/.test(t);
+}
+
 /**
  * Resolve the numeric type when two operands meet in a binary operation.
  *
@@ -88,6 +98,8 @@ export function typeNameCategory(typeName: string): string | null {
  * - Adoptable + concrete → adopt the concrete type
  * - Concrete + concrete → must match exactly
  * - Both adoptable → resolve to the shared default
+ * - §5: Integer literal may adopt a float type (cross-category promotion,
+ *   int→float only, never reverse)
  */
 export function resolveNumericTypes(
   leftType: string | null, rightType: string | null,
@@ -101,16 +113,31 @@ export function resolveNumericTypes(
   const rAdopt = isAdoptable(rightType);
 
   if (lAdopt && !rAdopt && ra) {
+    // §5: adoptable integer can adopt a float type (cross-category promotion)
+    if (typeof left === "bigint" && isFloatType(ra)) {
+      validateFloatType(Number(left), ra, node);
+      return ra;
+    }
     if (typeof left === "bigint") validateIntegerType(left, ra, node);
     else if (typeof left === "number") validateFloatType(left, ra, node);
     return ra;
   }
   if (rAdopt && !lAdopt && la) {
+    // §5: adoptable integer can adopt a float type (cross-category promotion)
+    if (typeof right === "bigint" && isFloatType(la)) {
+      validateFloatType(Number(right), la, node);
+      return la;
+    }
     if (typeof right === "bigint") validateIntegerType(right, la, node);
     else if (typeof right === "number") validateFloatType(right, la, node);
     return la;
   }
   if (la && ra && la !== ra) {
+    // §5: Both adoptable — integer literal adopts float type (int→float only)
+    if (lAdopt && rAdopt) {
+      if (isIntType(la) && isFloatType(ra)) return ra;
+      if (isFloatType(la) && isIntType(ra)) return la;
+    }
     throw new UzonTypeError(
       `Cannot mix ${la} and ${ra} in this operation — operands must be the same type`,
       node.line, node.col,
