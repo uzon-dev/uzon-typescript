@@ -61,6 +61,22 @@ msg is case level
     when low then "minor"
     else "normal"
 
+// Type dispatch on unions
+result is case type value
+    when i32 then "integer"
+    when string then "text"
+    else "other"
+
+// Variant dispatch on tagged unions
+output is case named status
+    when success then "ok"
+    when failure then "error"
+    else "unknown"
+
+// Type checking
+valid is x is type i32
+wrong is x is not type string
+
 // Functions
 double is function n as i32 returns i32 { n * 2 }
 evens is std.filter(numbers, function n as i64 returns bool { n % 2 is 0 })
@@ -82,21 +98,21 @@ For the full language specification, see [UZON Specification](https://github.com
 
 UZON values in TypeScript are represented by the `UzonValue` type:
 
-| UZON type     | TypeScript type            | Example                                      |
-|---------------|----------------------------|----------------------------------------------|
-| integer       | `bigint`                   | `42n`                                        |
-| float         | `number`                   | `3.14`                                       |
-| string        | `string`                   | `"hello"`                                    |
-| bool          | `boolean`                  | `true`                                       |
-| null          | `null`                     | `null`                                       |
-| list          | `UzonValue[]`              | `[1n, 2n, 3n]`                               |
-| tuple         | `UzonTuple`                | `UzonTuple([1n, "a"])`                       |
-| struct        | `Record<string, UzonValue>`| `{ host: "localhost" }`                      |
-| enum          | `UzonEnum`                 | `UzonEnum("red", ["red", "green", "blue"])`  |
-| union         | `UzonUnion`                | `UzonUnion(42n, ["i32", "string"])`          |
-| tagged union  | `UzonTaggedUnion`          | `UzonTaggedUnion(42n, "ok", variants)`       |
-| function      | `UzonFunction`             | (first-class, pure)                          |
-| undefined     | `typeof UZON_UNDEFINED`    | sentinel for unresolved lookups              |
+| UZON type    | TypeScript type             | Example                                     |
+|--------------|-----------------------------|---------------------------------------------|
+| integer      | `bigint`                    | `42n`                                       |
+| float        | `number`                    | `3.14`                                      |
+| string       | `string`                    | `"hello"`                                   |
+| bool         | `boolean`                   | `true`                                      |
+| null         | `null`                      | `null`                                      |
+| list         | `UzonValue[]`               | `[1n, 2n, 3n]`                              |
+| tuple        | `UzonTuple`                 | `UzonTuple([1n, "a"])`                      |
+| struct       | `Record<string, UzonValue>` | `{ host: "localhost" }`                     |
+| enum         | `UzonEnum`                  | `UzonEnum("red", ["red", "green", "blue"])` |
+| union        | `UzonUnion`                 | `UzonUnion(42n, ["i32", "string"])`         |
+| tagged union | `UzonTaggedUnion`           | `UzonTaggedUnion(42n, "ok", variants)`      |
+| function     | `UzonFunction`              | (first-class, pure)                         |
+| undefined    | `typeof UZON_UNDEFINED`     | sentinel for unresolved lookups             |
 
 ---
 
@@ -995,6 +1011,7 @@ type BinaryOp =
   | "<" | "<=" | ">" | ">="
   | "and" | "or"
   | "is" | "is not" | "is named" | "is not named"
+  | "is type" | "is not type"
   | "in";
 
 // AstNode is a discriminated union of all expression node types
@@ -1005,7 +1022,7 @@ type AstNode = IntegerLiteralNode | FloatLiteralNode | StringLiteralNode | BoolL
 
 #### `TokenType` (enum)
 
-Covers all UZON token types: `Integer`, `Float`, `String`, `True`, `False`, `Null`, `Identifier`, `Is`, `From`, `Called`, `As`, `Named`, `With`, `Plus`, `Minus`, `Star`, `Slash`, `LBrace`, `RBrace`, `LBracket`, `RBracket`, `LParen`, `RParen`, `Comma`, `Dot`, `Newline`, `Eof`, and more.
+Covers all UZON token types: `Integer`, `Float`, `String`, `True`, `False`, `Null`, `Identifier`, `Is`, `Are`, `From`, `Called`, `As`, `Named`, `With`, `PlusKw`, `Type`, `To`, `Of`, `And`, `Or`, `Not`, `If`, `Then`, `Else`, `Case`, `When`, `Env`, `Struct`, `In`, `Function`, `Returns`, `Default`, `OrElse`, `IsNot`, `IsNamed`, `IsNotNamed`, `IsType`, `IsNotType`, `Plus`, `Minus`, `Star`, `Slash`, `LBrace`, `RBrace`, `LBracket`, `RBracket`, `LParen`, `RParen`, `Comma`, `Dot`, `At`, `Newline`, `Eof`, and more.
 
 #### `formatUzonFloat(value)`
 
