@@ -135,27 +135,53 @@ function evalOr(
 
 // ── Equality ──
 
+function evalIsOperands(
+  ctx: EvalContext,
+  node: { left: AstNode; right: AstNode; line: number; col: number },
+  scope: Scope, exclude?: string,
+): [UzonValue, UzonValue] {
+  let left: UzonValue, right: UzonValue;
+  let leftNumType: string | null, rightNumType: string | null;
+  if (node.right.kind === "Identifier") {
+    left = ctx.evalNode(node.left, scope, exclude);
+    leftNumType = ctx.numericType;
+    if (left instanceof UzonUnion) left = left.value;
+    right = ctx.resolveEnumVariantOrEval(node.right, left, scope, exclude);
+    rightNumType = ctx.numericType;
+  } else if (node.left.kind === "Identifier") {
+    right = ctx.evalNode(node.right, scope, exclude);
+    rightNumType = ctx.numericType;
+    if (right instanceof UzonUnion) right = right.value;
+    left = ctx.resolveEnumVariantOrEval(node.left, right, scope, exclude);
+    leftNumType = ctx.numericType;
+  } else {
+    left = ctx.evalNode(node.left, scope, exclude);
+    leftNumType = ctx.numericType;
+    right = ctx.evalNode(node.right, scope, exclude);
+    rightNumType = ctx.numericType;
+  }
+  if (left instanceof UzonUnion) left = left.value;
+  if (right instanceof UzonUnion) right = right.value;
+
+  // §5: cross-category promotion for is/is not — adoptable int can adopt float type
+  if (typeof left === "bigint" && typeof right === "number"
+      && isAdoptable(leftNumType)) {
+    left = Number(left);
+  } else if (typeof right === "bigint" && typeof left === "number"
+      && isAdoptable(rightNumType)) {
+    right = Number(right);
+  }
+
+  assertSameType(left, right, node as AstNode);
+  return [left, right];
+}
+
 function evalIs(
   ctx: EvalContext,
   node: { left: AstNode; right: AstNode; line: number; col: number },
   scope: Scope, exclude?: string,
 ): boolean {
-  let left: UzonValue, right: UzonValue;
-  if (node.right.kind === "Identifier") {
-    left = ctx.evalNode(node.left, scope, exclude);
-    if (left instanceof UzonUnion) left = left.value;
-    right = ctx.resolveEnumVariantOrEval(node.right, left, scope, exclude);
-  } else if (node.left.kind === "Identifier") {
-    right = ctx.evalNode(node.right, scope, exclude);
-    if (right instanceof UzonUnion) right = right.value;
-    left = ctx.resolveEnumVariantOrEval(node.left, right, scope, exclude);
-  } else {
-    left = ctx.evalNode(node.left, scope, exclude);
-    right = ctx.evalNode(node.right, scope, exclude);
-  }
-  if (left instanceof UzonUnion) left = left.value;
-  if (right instanceof UzonUnion) right = right.value;
-  assertSameType(left, right, node as AstNode);
+  const [left, right] = evalIsOperands(ctx, node, scope, exclude);
   return valuesEqual(left, right);
 }
 
@@ -164,22 +190,7 @@ function evalIsNot(
   node: { left: AstNode; right: AstNode; line: number; col: number },
   scope: Scope, exclude?: string,
 ): boolean {
-  let left: UzonValue, right: UzonValue;
-  if (node.right.kind === "Identifier") {
-    left = ctx.evalNode(node.left, scope, exclude);
-    if (left instanceof UzonUnion) left = left.value;
-    right = ctx.resolveEnumVariantOrEval(node.right, left, scope, exclude);
-  } else if (node.left.kind === "Identifier") {
-    right = ctx.evalNode(node.right, scope, exclude);
-    if (right instanceof UzonUnion) right = right.value;
-    left = ctx.resolveEnumVariantOrEval(node.left, right, scope, exclude);
-  } else {
-    left = ctx.evalNode(node.left, scope, exclude);
-    right = ctx.evalNode(node.right, scope, exclude);
-  }
-  if (left instanceof UzonUnion) left = left.value;
-  if (right instanceof UzonUnion) right = right.value;
-  assertSameType(left, right, node as AstNode);
+  const [left, right] = evalIsOperands(ctx, node, scope, exclude);
   return !valuesEqual(left, right);
 }
 
@@ -239,16 +250,8 @@ function valueMatchesType(value: UzonValue, typeName: string): boolean {
   if (value === null) return typeName === "null";
   if (typeof value === "boolean") return typeName === "bool";
   if (typeof value === "string") return typeName === "string";
-  if (typeof value === "bigint") {
-    if (typeName === "i64") return true; // default integer type
-    const intTypes = ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"];
-    return intTypes.includes(typeName);
-  }
-  if (typeof value === "number") {
-    if (typeName === "f64") return true; // default float type
-    const floatTypes = ["f16", "f32", "f64", "f128"];
-    return floatTypes.includes(typeName);
-  }
+  if (typeof value === "bigint") return /^[iu]\d+$/.test(typeName);
+  if (typeof value === "number") return /^f\d+$/.test(typeName);
   if (Array.isArray(value)) return typeName.startsWith("[");
   if (value instanceof UzonEnum) {
     if (value.typeName && value.typeName === typeName) return true;
@@ -344,34 +347,42 @@ function evalArithmetic(
   const right = unwrapValue(rawRight);
   const resultType = resolveNumericTypes(leftNumType, rightNumType, left, right, node);
 
+  // §5: cross-category promotion — convert bigint to number when resolved type is float
+  let lVal = left;
+  let rVal = right;
+  if (resultType && /^f\d+$/.test(resultType)) {
+    if (typeof lVal === "bigint") lVal = Number(lVal);
+    if (typeof rVal === "bigint") rVal = Number(rVal);
+  }
+
   let result: UzonValue | undefined;
-  if (typeof left === "bigint" && typeof right === "bigint") {
+  if (typeof lVal === "bigint" && typeof rVal === "bigint") {
     switch (op) {
-      case "+": result = left + right; break;
-      case "-": result = left - right; break;
-      case "*": result = left * right; break;
+      case "+": result = lVal + rVal; break;
+      case "-": result = lVal - rVal; break;
+      case "*": result = lVal * rVal; break;
       case "/":
-        if (right === 0n) throw new UzonRuntimeError("Division by zero", node.line, node.col);
-        result = left / right; break;
+        if (rVal === 0n) throw new UzonRuntimeError("Division by zero", node.line, node.col);
+        result = lVal / rVal; break;
       case "%":
-        if (right === 0n) throw new UzonRuntimeError("Modulo by zero", node.line, node.col);
-        result = left % right; break;
+        if (rVal === 0n) throw new UzonRuntimeError("Modulo by zero", node.line, node.col);
+        result = lVal % rVal; break;
       case "^":
-        if (right < 0n) throw new UzonRuntimeError("Integer exponent must be non-negative", node.line, node.col);
-        result = left ** right; break;
+        if (rVal < 0n) throw new UzonRuntimeError("Integer exponent must be non-negative", node.line, node.col);
+        result = lVal ** rVal; break;
     }
-  } else if (typeof left === "number" && typeof right === "number") {
+  } else if (typeof lVal === "number" && typeof rVal === "number") {
     switch (op) {
-      case "+": result = left + right; break;
-      case "-": result = left - right; break;
-      case "*": result = left * right; break;
-      case "/": result = left / right; break;
-      case "%": result = left % right; break;
-      case "^": result = Math.pow(left, right); break;
+      case "+": result = lVal + rVal; break;
+      case "-": result = lVal - rVal; break;
+      case "*": result = lVal * rVal; break;
+      case "/": result = lVal / rVal; break;
+      case "%": result = lVal % rVal; break;
+      case "^": result = Math.pow(lVal, rVal); break;
     }
-  } else if (typeof left === "bigint" && typeof right === "number") {
+  } else if (typeof lVal === "bigint" && typeof rVal === "number") {
     throw new UzonTypeError("Cannot mix integer and float in arithmetic — use 'to' to convert", node.line, node.col);
-  } else if (typeof left === "number" && typeof right === "bigint") {
+  } else if (typeof lVal === "number" && typeof rVal === "bigint") {
     throw new UzonTypeError("Cannot mix float and integer in arithmetic — use 'to' to convert", node.line, node.col);
   }
 
@@ -398,9 +409,15 @@ function evalComparison(
       node.line, node.col,
     );
   }
-  const left = unwrapValue(rawLeft);
-  const right = unwrapValue(rawRight);
-  resolveNumericTypes(leftNumType, rightNumType, left, right, node);
+  let left = unwrapValue(rawLeft);
+  let right = unwrapValue(rawRight);
+  const resolvedType = resolveNumericTypes(leftNumType, rightNumType, left, right, node);
+
+  // §5: cross-category promotion — convert bigint to number when resolved type is float
+  if (resolvedType && /^f\d+$/.test(resolvedType)) {
+    if (typeof left === "bigint") left = Number(left);
+    if (typeof right === "bigint") right = Number(right);
+  }
 
   if (typeof left === "bigint" && typeof right === "bigint") {
     switch (op) {

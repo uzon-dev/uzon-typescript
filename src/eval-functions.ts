@@ -156,7 +156,9 @@ export function callFunctionDirect(
 
   const locals = new Map<string, UzonValue>();
   for (let i = 0; i < totalParams; i++) {
-    locals.set(fn.paramNames[i], i < args.length ? args[i] : fn.defaultValues[i]!);
+    const argVal = i < args.length ? args[i] : fn.defaultValues[i]!;
+    checkArgTypeDirect(argVal, fn.paramTypes[i], fn.paramNames[i], node);
+    locals.set(fn.paramNames[i], argVal);
   }
 
   const closureScope = fn.closureScope as Scope;
@@ -255,6 +257,42 @@ function checkArgType(
   }
 }
 
+/** Type check for pre-evaluated arguments (used by callFunctionDirect / HOF callbacks). */
+function checkArgTypeDirect(
+  val: UzonValue, expectedType: string, paramName: string, node: AstNode,
+): void {
+  if (!expectedType || val === null) return;
+  if (val === UZON_UNDEFINED) {
+    throw new UzonRuntimeError(`Argument '${paramName}' is undefined`, node.line, node.col);
+  }
+  if (/^[iu]\d+$/.test(expectedType)) {
+    if (typeof val !== "bigint") {
+      throw new UzonTypeError(`Argument '${paramName}' expected ${expectedType} but got ${typeTag(val)}`, node.line, node.col);
+    }
+    validateIntegerType(val, expectedType, node);
+    return;
+  }
+  if (/^f\d+$/.test(expectedType)) {
+    if (typeof val !== "number") {
+      throw new UzonTypeError(`Argument '${paramName}' expected ${expectedType} but got ${typeTag(val)}`, node.line, node.col);
+    }
+    validateFloatType(val, expectedType, node);
+    return;
+  }
+  if (expectedType === "bool") {
+    if (typeof val !== "boolean") {
+      throw new UzonTypeError(`Argument '${paramName}' expected bool but got ${typeTag(val)}`, node.line, node.col);
+    }
+    return;
+  }
+  if (expectedType === "string") {
+    if (typeof val !== "string") {
+      throw new UzonTypeError(`Argument '${paramName}' expected string but got ${typeTag(val)}`, node.line, node.col);
+    }
+    return;
+  }
+}
+
 // ── Return type checking ──
 
 function checkReturnType(ctx: EvalContext, result: UzonValue, returnType: string, node: AstNode): void {
@@ -279,6 +317,20 @@ function checkReturnType(ctx: EvalContext, result: UzonValue, returnType: string
   if (returnType === "string" && typeof result !== "string") {
     throw new UzonTypeError(`Function return type is string but body evaluated to ${typeTag(result)}`, node.line, node.col);
   }
+  // List return type
+  if (returnType.startsWith("[") && returnType.endsWith("]")) {
+    if (!Array.isArray(result)) {
+      throw new UzonTypeError(`Function return type is ${returnType} but body evaluated to ${typeTag(result)}`, node.line, node.col);
+    }
+    return;
+  }
+  // Tuple return type
+  if (returnType.startsWith("(") && returnType.endsWith(")")) {
+    if (!(result instanceof UzonTuple)) {
+      throw new UzonTypeError(`Function return type is ${returnType} but body evaluated to ${typeTag(result)}`, node.line, node.col);
+    }
+    return;
+  }
   // Named struct type: verify the result's struct type name matches
   if (typeof result === "object" && !Array.isArray(result)
       && !(result instanceof UzonEnum) && !(result instanceof UzonUnion)
@@ -291,6 +343,17 @@ function checkReturnType(ctx: EvalContext, result: UzonValue, returnType: string
         node.line, node.col,
       );
     }
+    return;
+  }
+  // Enum return type
+  if (result instanceof UzonEnum) {
+    if (result.typeName && result.typeName !== returnType) {
+      throw new UzonTypeError(
+        `Function return type is '${returnType}' but body evaluated to enum '${result.typeName}'`,
+        node.line, node.col,
+      );
+    }
+    return;
   }
 }
 

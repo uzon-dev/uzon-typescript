@@ -361,7 +361,9 @@ export class Evaluator implements EvalContext {
     const cleaned = raw.replace(/_/g, "");
     if (cleaned.startsWith("0x") || cleaned.startsWith("0X")
         || cleaned.startsWith("-0x") || cleaned.startsWith("-0X")) {
-      return BigInt(cleaned);
+      const neg = cleaned.startsWith("-");
+      const val = BigInt("0x" + cleaned.slice(neg ? 3 : 2));
+      return neg ? -val : val;
     }
     if (cleaned.startsWith("0o") || cleaned.startsWith("0O")
         || cleaned.startsWith("-0o") || cleaned.startsWith("-0O")) {
@@ -371,7 +373,9 @@ export class Evaluator implements EvalContext {
     }
     if (cleaned.startsWith("0b") || cleaned.startsWith("0B")
         || cleaned.startsWith("-0b") || cleaned.startsWith("-0B")) {
-      return BigInt(cleaned);
+      const neg = cleaned.startsWith("-");
+      const val = BigInt("0b" + cleaned.slice(neg ? 3 : 2));
+      return neg ? -val : val;
     }
     return BigInt(cleaned);
   }
@@ -459,6 +463,10 @@ export class Evaluator implements EvalContext {
     }
     // §3.7.1: tagged unions are transparent
     if (obj instanceof UzonTaggedUnion) {
+      return this.accessMember(obj.value, member, node);
+    }
+    // §3.6: untagged unions are transparent for member access
+    if (obj instanceof UzonUnion) {
       return this.accessMember(obj.value, member, node);
     }
     // Struct field
@@ -846,6 +854,15 @@ export class Evaluator implements EvalContext {
         ...(fieldAnnotations.size > 0 ? { fieldAnnotations } : {}),
         templateValue: val as Record<string, UzonValue>,
       });
+    } else {
+      // Primitives and null — register as a primitive type
+      const baseType = val === null ? "null"
+        : typeof val === "boolean" ? "bool"
+        : typeof val === "bigint" ? "i64"
+        : typeof val === "number" ? "f64"
+        : typeof val === "string" ? "string"
+        : "unknown";
+      scope.setType(name, { kind: "primitive", name, elementType: baseType });
     }
   }
 

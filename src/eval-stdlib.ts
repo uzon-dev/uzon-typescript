@@ -57,6 +57,20 @@ function expectArgs(argNodes: AstNode[], count: number, fnName: string, node: As
   }
 }
 
+/** §D.2: undefined as argument to a std function is a runtime error. */
+function evalArg(
+  ctx: EvalContext, argNode: AstNode, scope: Scope,
+  exclude: string | undefined, fnName: string, _node: AstNode,
+): UzonValue {
+  const val = ctx.evalNode(argNode, scope, exclude);
+  if (val === UZON_UNDEFINED) {
+    throw new UzonRuntimeError(
+      `Argument of std.${fnName} is undefined`, argNode.line, argNode.col,
+    );
+  }
+  return val;
+}
+
 function isStruct(val: UzonValue): val is Record<string, UzonValue> {
   return val !== null && typeof val === "object" && !Array.isArray(val)
     && !(val instanceof UzonEnum) && !(val instanceof UzonUnion)
@@ -64,11 +78,18 @@ function isStruct(val: UzonValue): val is Record<string, UzonValue> {
     && !(val instanceof UzonFunction);
 }
 
+/** §3.6/§3.7.1: unwrap union/tagged union to access inner value. */
+function unwrapUnion(val: UzonValue): UzonValue {
+  if (val instanceof UzonTaggedUnion) return val.value;
+  if (val instanceof UzonUnion) return val.value;
+  return val;
+}
+
 // ── Collection queries ──
 
 function stdLen(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
   expectArgs(argNodes, 1, "len", node);
-  const val = ctx.evalNode(argNodes[0], scope, exclude);
+  const val = unwrapUnion(evalArg(ctx, argNodes[0], scope, exclude, "len", node));
   if (typeof val === "string") { ctx.numericType = "i64"; return BigInt([...val].length); }
   if (Array.isArray(val)) { ctx.numericType = "i64"; return BigInt(val.length); }
   if (val instanceof UzonTuple) { ctx.numericType = "i64"; return BigInt(val.length); }
@@ -78,9 +99,13 @@ function stdLen(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: st
 
 function stdHas(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
   expectArgs(argNodes, 2, "has", node);
-  const collection = ctx.evalNode(argNodes[0], scope, exclude);
-  const key = ctx.evalNode(argNodes[1], scope, exclude);
-  if (Array.isArray(collection)) return ctx.evalIn(key, collection, node);
+  const collection = unwrapUnion(evalArg(ctx, argNodes[0], scope, exclude, "has", node));
+  const key = evalArg(ctx, argNodes[1], scope, exclude, "has", node);
+  const keyNumType = ctx.numericType;
+  if (Array.isArray(collection)) {
+    const collectionNumType = ctx.listElementTypes.get(collection) ?? null;
+    return ctx.evalIn(key, collection, node, keyNumType, collectionNumType);
+  }
   if (isStruct(collection)) {
     if (typeof key !== "string") throw new UzonTypeError("std.has on a struct requires a string key", node.line, node.col);
     return key in collection;
@@ -90,31 +115,37 @@ function stdHas(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: st
 
 function stdGet(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
   expectArgs(argNodes, 2, "get", node);
-  const collection = ctx.evalNode(argNodes[0], scope, exclude);
-  const key = ctx.evalNode(argNodes[1], scope, exclude);
+  const collection = unwrapUnion(evalArg(ctx, argNodes[0], scope, exclude, "get", node));
+  const key = evalArg(ctx, argNodes[1], scope, exclude, "get", node);
   if (Array.isArray(collection)) {
     if (typeof key !== "bigint") throw new UzonTypeError("std.get on a list requires an integer index", node.line, node.col);
     const idx = Number(key);
     if (idx < 0 || idx >= collection.length) return UZON_UNDEFINED as UzonValue;
     return collection[idx];
   }
+  if (collection instanceof UzonTuple) {
+    if (typeof key !== "bigint") throw new UzonTypeError("std.get on a tuple requires an integer index", node.line, node.col);
+    const idx = Number(key);
+    if (idx < 0 || idx >= collection.length) return UZON_UNDEFINED as UzonValue;
+    return collection.elements[idx];
+  }
   if (isStruct(collection)) {
     if (typeof key !== "string") throw new UzonTypeError("std.get on a struct requires a string key", node.line, node.col);
     return key in collection ? collection[key] : UZON_UNDEFINED as UzonValue;
   }
-  throw new UzonTypeError("std.get requires a list or struct", node.line, node.col);
+  throw new UzonTypeError("std.get requires a list, tuple, or struct", node.line, node.col);
 }
 
 function stdKeys(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
   expectArgs(argNodes, 1, "keys", node);
-  const val = ctx.evalNode(argNodes[0], scope, exclude);
+  const val = unwrapUnion(evalArg(ctx, argNodes[0], scope, exclude, "keys", node));
   if (isStruct(val)) return Object.keys(val);
   throw new UzonTypeError("std.keys requires a struct", node.line, node.col);
 }
 
 function stdValues(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
   expectArgs(argNodes, 1, "values", node);
-  const val = ctx.evalNode(argNodes[0], scope, exclude);
+  const val = unwrapUnion(evalArg(ctx, argNodes[0], scope, exclude, "values", node));
   if (isStruct(val)) return new UzonTuple(Object.values(val));
   throw new UzonTypeError("std.values requires a struct", node.line, node.col);
 }
@@ -123,9 +154,9 @@ function stdValues(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude:
 
 function stdMap(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
   expectArgs(argNodes, 2, "map", node);
-  const list = ctx.evalNode(argNodes[0], scope, exclude);
+  const list = unwrapUnion(evalArg(ctx, argNodes[0], scope, exclude, "map", node));
   if (!Array.isArray(list)) throw new UzonTypeError("std.map requires a list as the first argument", node.line, node.col);
-  const fn = ctx.evalNode(argNodes[1], scope, exclude);
+  const fn = evalArg(ctx, argNodes[1], scope, exclude, "map", node);
   if (!(fn instanceof UzonFunction)) throw new UzonTypeError("std.map requires a function as the second argument", node.line, node.col);
   if (fn.paramNames.length < 1) throw new UzonTypeError("std.map function must take at least one parameter", node.line, node.col);
   const result: UzonValue[] = [];
@@ -135,9 +166,9 @@ function stdMap(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: st
 
 function stdFilter(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
   expectArgs(argNodes, 2, "filter", node);
-  const list = ctx.evalNode(argNodes[0], scope, exclude);
+  const list = unwrapUnion(evalArg(ctx, argNodes[0], scope, exclude, "filter", node));
   if (!Array.isArray(list)) throw new UzonTypeError("std.filter requires a list as the first argument", node.line, node.col);
-  const fn = ctx.evalNode(argNodes[1], scope, exclude);
+  const fn = evalArg(ctx, argNodes[1], scope, exclude, "filter", node);
   if (!(fn instanceof UzonFunction)) throw new UzonTypeError("std.filter requires a function as the second argument", node.line, node.col);
   if (fn.returnType !== "bool") throw new UzonTypeError("std.filter function must return bool", node.line, node.col);
   const result: UzonValue[] = [];
@@ -153,9 +184,9 @@ function stdFilter(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude:
 
 function stdSort(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
   expectArgs(argNodes, 2, "sort", node);
-  const list = ctx.evalNode(argNodes[0], scope, exclude);
+  const list = unwrapUnion(evalArg(ctx, argNodes[0], scope, exclude, "sort", node));
   if (!Array.isArray(list)) throw new UzonTypeError("std.sort requires a list as the first argument", node.line, node.col);
-  const fn = ctx.evalNode(argNodes[1], scope, exclude);
+  const fn = evalArg(ctx, argNodes[1], scope, exclude, "sort", node);
   if (!(fn instanceof UzonFunction)) throw new UzonTypeError("std.sort requires a comparator function as the second argument", node.line, node.col);
   if (fn.paramNames.length < 2) throw new UzonTypeError("std.sort comparator must take two parameters", node.line, node.col);
   if (fn.returnType !== "bool") throw new UzonTypeError("std.sort comparator must return bool", node.line, node.col);
@@ -178,10 +209,10 @@ function stdSort(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: s
 
 function stdReduce(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
   expectArgs(argNodes, 3, "reduce", node);
-  const list = ctx.evalNode(argNodes[0], scope, exclude);
+  const list = unwrapUnion(evalArg(ctx, argNodes[0], scope, exclude, "reduce", node));
   if (!Array.isArray(list)) throw new UzonTypeError("std.reduce requires a list as the first argument", node.line, node.col);
-  let acc = ctx.evalNode(argNodes[1], scope, exclude);
-  const fn = ctx.evalNode(argNodes[2], scope, exclude);
+  let acc = evalArg(ctx, argNodes[1], scope, exclude, "reduce", node);
+  const fn = evalArg(ctx, argNodes[2], scope, exclude, "reduce", node);
   if (!(fn instanceof UzonFunction)) throw new UzonTypeError("std.reduce requires a function as the third argument", node.line, node.col);
   if (fn.paramNames.length < 2) throw new UzonTypeError("std.reduce function must take at least two parameters", node.line, node.col);
   if (fn.returnType) {
@@ -209,21 +240,21 @@ function stdReduce(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude:
 
 function stdIsNan(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
   expectArgs(argNodes, 1, "isNan", node);
-  const val = ctx.evalNode(argNodes[0], scope, exclude);
+  const val = evalArg(ctx, argNodes[0], scope, exclude, "isNan", node);
   if (typeof val !== "number") throw new UzonTypeError("std.isNan requires a float value", node.line, node.col);
   return Number.isNaN(val);
 }
 
 function stdIsInf(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
   expectArgs(argNodes, 1, "isInf", node);
-  const val = ctx.evalNode(argNodes[0], scope, exclude);
+  const val = evalArg(ctx, argNodes[0], scope, exclude, "isInf", node);
   if (typeof val !== "number") throw new UzonTypeError("std.isInf requires a float value", node.line, node.col);
   return val === Infinity || val === -Infinity;
 }
 
 function stdIsFinite_(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
   expectArgs(argNodes, 1, "isFinite", node);
-  const val = ctx.evalNode(argNodes[0], scope, exclude);
+  const val = evalArg(ctx, argNodes[0], scope, exclude, "isFinite", node);
   if (typeof val !== "number") throw new UzonTypeError("std.isFinite requires a float value", node.line, node.col);
   return Number.isFinite(val);
 }
@@ -232,8 +263,8 @@ function stdIsFinite_(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclu
 
 function stdJoin(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
   expectArgs(argNodes, 2, "join", node);
-  const list = ctx.evalNode(argNodes[0], scope, exclude);
-  const sep = ctx.evalNode(argNodes[1], scope, exclude);
+  const list = unwrapUnion(evalArg(ctx, argNodes[0], scope, exclude, "join", node));
+  const sep = evalArg(ctx, argNodes[1], scope, exclude, "join", node);
   if (!Array.isArray(list)) throw new UzonTypeError("std.join requires a [string] list as first argument", node.line, node.col);
   if (typeof sep !== "string") throw new UzonTypeError("std.join requires a string separator", node.line, node.col);
   for (let i = 0; i < list.length; i++) {
@@ -244,9 +275,9 @@ function stdJoin(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: s
 
 function stdReplace(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
   expectArgs(argNodes, 3, "replace", node);
-  const str = ctx.evalNode(argNodes[0], scope, exclude);
-  const target = ctx.evalNode(argNodes[1], scope, exclude);
-  const replacement = ctx.evalNode(argNodes[2], scope, exclude);
+  const str = evalArg(ctx, argNodes[0], scope, exclude, "replace", node);
+  const target = evalArg(ctx, argNodes[1], scope, exclude, "replace", node);
+  const replacement = evalArg(ctx, argNodes[2], scope, exclude, "replace", node);
   if (typeof str !== "string" || typeof target !== "string" || typeof replacement !== "string") {
     throw new UzonTypeError("std.replace requires three string arguments", node.line, node.col);
   }
@@ -256,8 +287,8 @@ function stdReplace(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude
 
 function stdSplit(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
   expectArgs(argNodes, 2, "split", node);
-  const str = ctx.evalNode(argNodes[0], scope, exclude);
-  const delim = ctx.evalNode(argNodes[1], scope, exclude);
+  const str = evalArg(ctx, argNodes[0], scope, exclude, "split", node);
+  const delim = evalArg(ctx, argNodes[1], scope, exclude, "split", node);
   if (typeof str !== "string" || typeof delim !== "string") {
     throw new UzonTypeError("std.split requires two string arguments", node.line, node.col);
   }
@@ -268,21 +299,21 @@ function stdSplit(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: 
 
 function stdTrim(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
   expectArgs(argNodes, 1, "trim", node);
-  const val = ctx.evalNode(argNodes[0], scope, exclude);
+  const val = evalArg(ctx, argNodes[0], scope, exclude, "trim", node);
   if (typeof val !== "string") throw new UzonTypeError("std.trim requires a string argument", node.line, node.col);
   return val.trim();
 }
 
 function stdLower(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
   expectArgs(argNodes, 1, "lower", node);
-  const val = ctx.evalNode(argNodes[0], scope, exclude);
+  const val = evalArg(ctx, argNodes[0], scope, exclude, "lower", node);
   if (typeof val !== "string") throw new UzonTypeError("std.lower requires a string argument", node.line, node.col);
   return val.toLowerCase();
 }
 
 function stdUpper(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
   expectArgs(argNodes, 1, "upper", node);
-  const val = ctx.evalNode(argNodes[0], scope, exclude);
+  const val = evalArg(ctx, argNodes[0], scope, exclude, "upper", node);
   if (typeof val !== "string") throw new UzonTypeError("std.upper requires a string argument", node.line, node.col);
   return val.toUpperCase();
 }

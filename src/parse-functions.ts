@@ -80,12 +80,25 @@ function parseFunctionBody(ctx: ParseContext): { bindings: BindingNode[]; finalE
   ctx.skipNewlines();
 
   // 2-token lookahead: `identifier is` means binding; otherwise it's the final expression.
-  // Only plain Is/Are trigger bindings — composite operators (IsNamed, IsType, etc.)
-  // are expression operators, not binding starts (matches Go reference implementation).
+  // Only plain Is trigger bindings — composite operators (IsNamed, IsType, etc.)
+  // are expression operators, not binding starts.
   while (ctx.peek().type !== TokenType.RBrace) {
+    if (ctx.peek().type === TokenType.Identifier && ctx.peek(1).type === TokenType.Are) {
+      ctx.error(
+        "'are' bindings are not permitted inside function bodies — use 'is' with a list literal instead",
+        ctx.peek(),
+      );
+    }
     if (ctx.peek().type === TokenType.Identifier && ctx.peek(1).type === TokenType.Is) {
       bindings.push(parseFuncBinding(ctx));
       ctx.skipNewlines();
+      // §3.8: 'called' is not permitted inside function bodies
+      if (ctx.peek().type === TokenType.Called) {
+        ctx.error(
+          "'called' is not permitted inside function bodies — use 'as' with a type annotation instead",
+          ctx.peek(),
+        );
+      }
       if (ctx.peek().type === TokenType.Comma) {
         ctx.advance();
         ctx.skipNewlines();

@@ -121,6 +121,30 @@ export function evalStructOverride(
         }
       }
     }
+    // §3.2.1: When struct has a named type, null fields enforce the named type's field type
+    if (original === null && val !== null) {
+      const baseTypeName = ctx.structTypeNames.get(base as Record<string, UzonValue>);
+      if (baseTypeName) {
+        const typeDef = scope.getType([baseTypeName]);
+        if (typeDef?.fieldAnnotations) {
+          const expectedType = typeDef.fieldAnnotations.get(field.name);
+          if (expectedType) {
+            const valCat = typeCategory(val);
+            const expectedCat = /^[iu]\d+$/.test(expectedType) ? "integer"
+              : /^f\d+$/.test(expectedType) ? "float"
+              : expectedType === "bool" ? "bool"
+              : expectedType === "string" ? "string"
+              : null;
+            if (expectedCat && valCat !== expectedCat) {
+              throw new UzonTypeError(
+                `Cannot override null field '${field.name}' with ${valCat} — named type '${baseTypeName}' defines it as ${expectedType}`,
+                field.line, field.col,
+              );
+            }
+          }
+        }
+      }
+    }
     result[field.name] = val;
   }
 

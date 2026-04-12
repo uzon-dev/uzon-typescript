@@ -8,7 +8,7 @@
  */
 
 import type { AstNode, WhenClause } from "./ast.js";
-import type { Scope } from "./scope.js";
+import { Scope } from "./scope.js";
 import {
   UZON_UNDEFINED, UzonEnum, UzonUnion, UzonTaggedUnion,
   type UzonValue,
@@ -17,6 +17,20 @@ import { UzonRuntimeError, UzonTypeError } from "./error.js";
 import { isAdoptable } from "./eval-numeric.js";
 import type { EvalContext } from "./eval-context.js";
 import { assertSameType, valuesEqual, unwrapValue, assertBool } from "./eval-helpers.js";
+
+// ── Cross-category adoption helper ──
+
+/** §5: assertSameType with int→float cross-category adoption awareness.
+ *  An adoptable integer literal may unify with a float value in branch contexts. */
+function assertBranchTypeCompat(
+  a: UzonValue, aNumType: string | null,
+  b: UzonValue, bNumType: string | null,
+  node: AstNode,
+): void {
+  if (typeof a === "bigint" && typeof b === "number" && isAdoptable(aNumType)) return;
+  if (typeof b === "bigint" && typeof a === "number" && isAdoptable(bNumType)) return;
+  assertSameType(a, b, node);
+}
 
 // ── Or else ──
 
@@ -38,7 +52,7 @@ export function evalOrElse(
   try {
     const right = ctx.resolveEnumVariantOrEval(node.right, left, scope, exclude);
     if (right !== UZON_UNDEFINED && right !== null && left !== null) {
-      assertSameType(left, right, node as AstNode);
+      assertBranchTypeCompat(left, leftNumType, right, ctx.numericType, node as AstNode);
     }
   } catch (e) {
     if (e instanceof UzonTypeError) throw e;
@@ -67,7 +81,7 @@ export function evalIf(
       : ctx.evalNode(node.thenBranch, scope, exclude);
     if (taken !== null && other !== null
         && taken !== UZON_UNDEFINED && other !== UZON_UNDEFINED) {
-      assertSameType(taken, other, node as AstNode);
+      assertBranchTypeCompat(taken, takenNumType, other, ctx.numericType, node as AstNode);
     }
     // §3.4: empty list type inference from other branch
     if (Array.isArray(taken) && taken.length === 0 && Array.isArray(other) && other.length > 0) {
@@ -100,13 +114,6 @@ export function evalCase(
   }
 
   if (node.mode === "type") {
-    // §5.10: case type — only valid for untagged unions
-    if (!(scrutinee instanceof UzonUnion)) {
-      throw new UzonTypeError(
-        "'case type' is only valid for untagged unions — use 'case' for values or 'case named' for tagged unions",
-        node.line, node.col,
-      );
-    }
     return evalCaseType(ctx, node, scrutinee, scope, exclude);
   }
 
@@ -122,6 +129,7 @@ export function evalCase(
   }
 
   // mode === "value": standard value matching
+  const scrutineeNumType = ctx.numericType;
   if (scrutinee instanceof UzonUnion) {
     throw new UzonTypeError(
       "Cannot use 'case' with an untagged union — use 'case type' for type dispatch",
@@ -157,7 +165,7 @@ export function evalCase(
         wcNode.line, wcNode.col,
       );
     }
-    assertSameType(scrutinee, whenVal, wcNode);
+    assertBranchTypeCompat(scrutinee, scrutineeNumType, whenVal, ctx.numericType, wcNode);
     if (takenResult === undefined && valuesEqual(scrutinee, whenVal)) {
       takenResult = ctx.evalNode(wc.result, scope, exclude);
       takenNumType = ctx.numericType;
@@ -166,14 +174,14 @@ export function evalCase(
 
   const result = takenResult ?? ctx.evalNode(node.elseBranch, scope, exclude);
   const resultNumType = takenResult !== undefined ? takenNumType : ctx.numericType;
-  assertBranchTypes(ctx, node, result, takenResult !== undefined, scope, exclude);
+  assertBranchTypes(ctx, node, result, resultNumType, takenResult !== undefined, scope, exclude);
   ctx.numericType = resultNumType;
   return result;
 }
 
 function evalCaseNamed(
   ctx: EvalContext,
-  node: { whenClauses: WhenClause[]; elseBranch: AstNode; line: number; col: number },
+  node: { scrutinee: AstNode; whenClauses: WhenClause[]; elseBranch: AstNode; line: number; col: number },
   scrutinee: UzonTaggedUnion,
   scope: Scope, exclude?: string,
 ): UzonValue {
@@ -203,23 +211,57 @@ function evalCaseNamed(
 
   const result = takenResult ?? ctx.evalNode(node.elseBranch, scope, exclude);
   const resultNumType = takenResult !== undefined ? takenNumType : ctx.numericType;
-  assertBranchTypes(ctx, node, result, takenResult !== undefined, scope, exclude);
+  // §5.10: case named — branch narrowing + type enforcement
+  const narrowTypes = node.whenClauses.map(wc =>
+    scrutinee.variants.get(wc.value as string) ?? null);
+  const coveredTags = new Set(node.whenClauses.map(wc => wc.value as string));
+  const remainingTypes: string[] = [];
+  for (const [tag, innerType] of scrutinee.variants) {
+    if (!coveredTags.has(tag) && innerType) remainingTypes.push(innerType);
+  }
+  const elseNarrowType = remainingTypes.length === 1 ? remainingTypes[0] : null;
+  assertBranchTypesNarrowed(ctx, node, result, resultNumType, takenResult !== undefined,
+    node.scrutinee, narrowTypes, elseNarrowType, scope, exclude);
   ctx.numericType = resultNumType;
   return result;
 }
 
 function evalCaseType(
   ctx: EvalContext,
-  node: { whenClauses: WhenClause[]; elseBranch: AstNode; line: number; col: number },
-  scrutinee: UzonUnion,
+  node: { scrutinee: AstNode; whenClauses: WhenClause[]; elseBranch: AstNode; line: number; col: number },
+  scrutinee: UzonValue,
   scope: Scope, exclude?: string,
 ): UzonValue {
   let takenResult: UzonValue | undefined;
   let takenNumType: string | null = null;
 
-  const innerValue = scrutinee.value;
+  // Unwrap union/tagged union to get inner value for type matching
+  const isUnion = scrutinee instanceof UzonUnion;
+  const innerValue = isUnion ? scrutinee.value
+    : scrutinee instanceof UzonTaggedUnion ? scrutinee.value
+    : scrutinee;
+  // §5.10: when scrutinee is a union (tagged or untagged), validate when-types
+  const isTaggedUnion = scrutinee instanceof UzonTaggedUnion;
+  let memberTypes: readonly string[] | null = null;
+  if (isUnion) {
+    memberTypes = (scrutinee as UzonUnion).types;
+  } else if (isTaggedUnion) {
+    // For tagged unions, the valid types are the distinct inner types across all variants
+    const tu = scrutinee as UzonTaggedUnion;
+    const innerTypes = new Set<string>();
+    for (const vType of tu.variants.values()) {
+      if (vType) innerTypes.add(vType);
+    }
+    if (innerTypes.size > 0) memberTypes = [...innerTypes];
+  }
   for (const wc of node.whenClauses) {
     const typeName = wc.value as string;
+    if (memberTypes && !memberTypes.includes(typeName)) {
+      throw new UzonTypeError(
+        `'${typeName}' is not a member type of this ${isUnion ? "union" : "tagged union"} (members: ${memberTypes.join(", ")})`,
+        wc.line, wc.col,
+      );
+    }
     if (takenResult === undefined && valueMatchesTypeName(innerValue, typeName)) {
       takenResult = ctx.evalNode(wc.result, scope, exclude);
       takenNumType = ctx.numericType;
@@ -228,30 +270,108 @@ function evalCaseType(
 
   const result = takenResult ?? ctx.evalNode(node.elseBranch, scope, exclude);
   const resultNumType = takenResult !== undefined ? takenNumType : ctx.numericType;
-  assertBranchTypes(ctx, node, result, takenResult !== undefined, scope, exclude);
+  // §5.10: branch narrowing — non-matching branches are narrowed to the when-type
+  const narrowTypes: (string | null)[] = node.whenClauses.map(wc => wc.value as string);
+  const coveredTypes = new Set(narrowTypes.filter(Boolean) as string[]);
+  const elseNarrowType = memberTypes
+    ? (memberTypes.filter(t => !coveredTypes.has(t)).length === 1
+      ? memberTypes.find(t => !coveredTypes.has(t))!
+      : null)
+    : null;
+  assertBranchTypesNarrowed(ctx, node, result, resultNumType, takenResult !== undefined,
+    node.scrutinee, narrowTypes, elseNarrowType, scope, exclude);
   ctx.numericType = resultNumType;
   return result;
+}
+
+/** §5.10: Branch type checking with narrowing.
+ *  Speculatively evaluates non-matching branches in narrowed scopes.
+ *  Evaluation errors are suppressed (the branch may reference the scrutinee
+ *  in a type-dependent way). Successfully-evaluated results are always
+ *  checked for type compatibility — regardless of scrutinee type. */
+function assertBranchTypesNarrowed(
+  ctx: EvalContext,
+  node: { whenClauses: WhenClause[]; elseBranch: AstNode; line: number; col: number },
+  result: UzonValue, resultNumType: string | null, hasTaken: boolean,
+  scrutineeNode: AstNode,
+  narrowTypes: (string | null)[],
+  elseNarrowType: string | null,
+  scope: Scope, exclude?: string,
+): void {
+  const scrutineeName = scrutineeNode.kind === "Identifier"
+    ? (scrutineeNode as { name: string }).name : null;
+
+  for (let i = 0; i < node.whenClauses.length; i++) {
+    const wc = node.whenClauses[i];
+    const nt = narrowTypes[i];
+    const evalScope = (scrutineeName && nt)
+      ? createNarrowedScope(scope, scrutineeName, nt)
+      : scope;
+    let branchResult: UzonValue;
+    try {
+      branchResult = ctx.evalNode(wc.result, evalScope, exclude);
+    } catch (e) {
+      // §D.5: type errors are always reported; only runtime errors are suppressed
+      if (e instanceof UzonTypeError) throw e;
+      continue;
+    }
+    if (result !== null && branchResult !== null
+        && result !== UZON_UNDEFINED && branchResult !== UZON_UNDEFINED) {
+      assertBranchTypeCompat(result, resultNumType, branchResult, ctx.numericType, node as unknown as AstNode);
+    }
+  }
+  if (hasTaken) {
+    const evalScope = (scrutineeName && elseNarrowType)
+      ? createNarrowedScope(scope, scrutineeName, elseNarrowType)
+      : scope;
+    let elseResult: UzonValue;
+    try {
+      elseResult = ctx.evalNode(node.elseBranch, evalScope, exclude);
+    } catch (e) {
+      // §D.5: type errors are always reported; only runtime errors are suppressed
+      if (e instanceof UzonTypeError) throw e;
+      return;
+    }
+    if (result !== null && elseResult !== null
+        && result !== UZON_UNDEFINED && elseResult !== UZON_UNDEFINED) {
+      assertBranchTypeCompat(result, resultNumType, elseResult, ctx.numericType, node as unknown as AstNode);
+    }
+  }
+}
+
+// ── Narrowing helpers ──
+
+function createNarrowedScope(scope: Scope, name: string, typeName: string): Scope {
+  const child = new Scope(scope);
+  const val = defaultForType(typeName);
+  if (val === undefined) return scope; // Unknown type — can't narrow
+  child.set(name, val);
+  child.setNumericType(name, typeName);
+  return child;
+}
+
+function defaultForType(typeName: string): UzonValue | undefined {
+  if (/^[iu]\d+$/.test(typeName)) return 0n;
+  if (/^f\d+$/.test(typeName)) return 0.0;
+  if (typeName === "string") return "";
+  if (typeName === "bool") return false;
+  if (typeName === "null") return null;
+  return undefined;
 }
 
 function valueMatchesTypeName(value: UzonValue, typeName: string): boolean {
   if (value === null) return typeName === "null";
   if (typeof value === "boolean") return typeName === "bool";
   if (typeof value === "string") return typeName === "string";
-  if (typeof value === "bigint") {
-    const intTypes = ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"];
-    return intTypes.includes(typeName);
-  }
-  if (typeof value === "number") {
-    const floatTypes = ["f16", "f32", "f64", "f128"];
-    return floatTypes.includes(typeName);
-  }
+  if (typeof value === "bigint") return /^[iu]\d+$/.test(typeName);
+  if (typeof value === "number") return /^f\d+$/.test(typeName);
   return false;
 }
 
 function assertBranchTypes(
   ctx: EvalContext,
   node: { whenClauses: WhenClause[]; elseBranch: AstNode; line: number; col: number },
-  result: UzonValue, hasTaken: boolean,
+  result: UzonValue, resultNumType: string | null, hasTaken: boolean,
   scope: Scope, exclude?: string,
 ): void {
   for (const wc of node.whenClauses) {
@@ -259,7 +379,7 @@ function assertBranchTypes(
       const branchResult = ctx.evalNode(wc.result, scope, exclude);
       if (result !== null && branchResult !== null
           && result !== UZON_UNDEFINED && branchResult !== UZON_UNDEFINED) {
-        assertSameType(result, branchResult, node as unknown as AstNode);
+        assertBranchTypeCompat(result, resultNumType, branchResult, ctx.numericType, node as unknown as AstNode);
       }
       if (Array.isArray(result) && result.length === 0 && Array.isArray(branchResult) && branchResult.length > 0) {
         const otherElemType = ctx.listElementTypes.get(branchResult);
@@ -274,7 +394,7 @@ function assertBranchTypes(
       const elseResult = ctx.evalNode(node.elseBranch, scope, exclude);
       if (result !== null && elseResult !== null
           && result !== UZON_UNDEFINED && elseResult !== UZON_UNDEFINED) {
-        assertSameType(result, elseResult, node as unknown as AstNode);
+        assertBranchTypeCompat(result, resultNumType, elseResult, ctx.numericType, node as unknown as AstNode);
       }
       if (Array.isArray(result) && result.length === 0 && Array.isArray(elseResult) && elseResult.length > 0) {
         const otherElemType = ctx.listElementTypes.get(elseResult);

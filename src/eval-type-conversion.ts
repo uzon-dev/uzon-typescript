@@ -83,12 +83,12 @@ function convertUndefined(
   node: { expr: AstNode; line: number; col: number },
   typeName: string,
 ): UzonValue {
-  // §5.11: env.X to bool is always invalid even when undefined
+  // §5.11: env.X to bool/null is always invalid even when undefined
   if (node.expr.kind === "MemberAccess"
       && (node.expr as any).object?.kind === "EnvRef"
-      && typeName === "bool") {
+      && (typeName === "bool" || typeName === "null")) {
     throw new UzonTypeError(
-      `Cannot convert string to bool — not in the permitted conversions table`,
+      `Cannot convert string to ${typeName} — not in the permitted conversions table`,
       node.line, node.col,
     );
   }
@@ -146,11 +146,18 @@ function convertStringToNumeric(
     const n = Number(cleaned);
     if (isNaN(n)) throw new UzonRuntimeError(`Cannot convert '${val}' to ${typeName}`, node.line, node.col);
     if (!Number.isFinite(n)) throw new UzonRuntimeError(`Cannot convert '${val}' to ${typeName}`, node.line, node.col);
+    validateFloatType(n, typeName, node as AstNode);
     return n;
   }
   if (typeName.startsWith("i") || typeName.startsWith("u")) {
     let n: bigint;
-    try { n = BigInt(cleaned); }
+    try {
+      // JS BigInt() doesn't accept negative base-prefixed strings like "-0xff"
+      const neg = cleaned.startsWith("-");
+      const abs = neg ? cleaned.slice(1) : cleaned;
+      n = BigInt(abs);
+      if (neg) n = -n;
+    }
     catch { throw new UzonRuntimeError(`Cannot convert '${val}' to ${typeName}`, node.line, node.col); }
     validateIntegerType(n, typeName, node as AstNode);
     return n;
