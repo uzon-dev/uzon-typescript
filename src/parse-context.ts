@@ -29,6 +29,7 @@ export interface ParseContext {
   parseExpression(): AstNode;
   parseBindings(until: TokenType): BindingNode[];
   parseTypeExpr(): TypeExprNode;
+  parseTypeExprAsString(): string;
   parseVariantName(): string;
   isCommaFollowedByBinding(): boolean;
   tryParseCalled(): string | null;

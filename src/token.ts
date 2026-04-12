@@ -37,7 +37,8 @@ export enum TokenType {
   Named,
   With,
   Union,
-  Extends,
+  PlusKw,  // "plus" keyword for struct extension (§3.2.2)
+  Type,    // "type" keyword for runtime type check (§5.2)
 
   // Conversion / extraction (§5.11, §5.14)
   To,
@@ -74,6 +75,8 @@ export enum TokenType {
   IsNot,       // "is not"
   IsNamed,     // "is named"
   IsNotNamed,  // "is not named"
+  IsType,      // "is type"
+  IsNotType,   // "is not type"
 
   // Arithmetic (§5.3)
   Plus,     // +
@@ -137,7 +140,8 @@ export const KEYWORDS: Record<string, TokenType> = {
   named: TokenType.Named,
   with: TokenType.With,
   union: TokenType.Union,
-  extends: TokenType.Extends,
+  plus: TokenType.PlusKw,
+  type: TokenType.Type,
   to: TokenType.To,
   of: TokenType.Of,
   and: TokenType.And,
@@ -157,7 +161,7 @@ export const KEYWORDS: Record<string, TokenType> = {
 };
 
 /** Reserved words that are not yet keywords (§2.5). */
-export const RESERVED_KEYWORDS = new Set(["self", "lazy", "type"]);
+export const RESERVED_KEYWORDS = new Set(["lazy"]);
 
 /**
  * Characters that unconditionally terminate an identifier token (§2.3).

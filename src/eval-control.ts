@@ -86,8 +86,8 @@ export function evalIf(
 export function evalCase(
   ctx: EvalContext,
   node: {
-    kind: "CaseExpr"; scrutinee: AstNode; whenClauses: WhenClause[];
-    elseBranch: AstNode; line: number; col: number
+    kind: "CaseExpr"; mode: "value" | "type" | "named"; scrutinee: AstNode;
+    whenClauses: WhenClause[]; elseBranch: AstNode; line: number; col: number
   },
   scope: Scope, exclude?: string,
 ): UzonValue {
@@ -98,10 +98,33 @@ export function evalCase(
       node.line, node.col,
     );
   }
-  // §3.6 / §11.2.1: untagged unions cannot use case
+
+  if (node.mode === "type") {
+    // §5.10: case type — only valid for untagged unions
+    if (!(scrutinee instanceof UzonUnion)) {
+      throw new UzonTypeError(
+        "'case type' is only valid for untagged unions — use 'case' for values or 'case named' for tagged unions",
+        node.line, node.col,
+      );
+    }
+    return evalCaseType(ctx, node, scrutinee, scope, exclude);
+  }
+
+  if (node.mode === "named") {
+    // §5.10: case named — only valid for tagged unions
+    if (!(scrutinee instanceof UzonTaggedUnion)) {
+      throw new UzonTypeError(
+        "'case named' is only valid for tagged unions",
+        node.line, node.col,
+      );
+    }
+    return evalCaseNamed(ctx, node, scrutinee, scope, exclude);
+  }
+
+  // mode === "value": standard value matching
   if (scrutinee instanceof UzonUnion) {
     throw new UzonTypeError(
-      "Cannot use 'case' with an untagged union — use a tagged union for variant dispatch",
+      "Cannot use 'case' with an untagged union — use 'case type' for type dispatch",
       node.line, node.col,
     );
   }
@@ -109,73 +132,134 @@ export function evalCase(
   let takenResult: UzonValue | undefined;
   let takenNumType: string | null = null;
 
-  // Evaluate ALL when clauses for type checking
   for (const wc of node.whenClauses) {
-    if (wc.isNamed) {
-      if (!(scrutinee instanceof UzonTaggedUnion)) {
-        throw new UzonTypeError("'when named' requires a tagged union", wc.line, wc.col);
-      }
-      const variantName = wc.value as string;
-      let knownVariants: string[] | undefined;
-      if (scrutinee.variants.size > 0) {
-        knownVariants = [...scrutinee.variants.keys()];
-      } else if (scrutinee.typeName) {
-        const typeDef = scope.getType([scrutinee.typeName]);
-        if (typeDef && typeDef.variants) knownVariants = typeDef.variants;
-      }
-      if (knownVariants && !knownVariants.includes(variantName)) {
-        throw new UzonTypeError(
-          `'${variantName}' is not a valid variant of this tagged union (variants: ${knownVariants.join(", ")})`,
-          wc.line, wc.col,
-        );
-      }
-      if (takenResult === undefined && scrutinee.tag === variantName) {
-        takenResult = ctx.evalNode(wc.result, scope, exclude);
-        takenNumType = ctx.numericType;
-      }
-    } else {
-      const wcNode = wc.value as AstNode;
-      if (wcNode.kind === "UndefinedLiteral") {
-        throw new UzonRuntimeError(
-          "'when undefined' is not allowed — use 'is undefined' check before 'case'",
-          wc.line, wc.col,
-        );
-      }
-      let whenVal: UzonValue;
-      if (scrutinee instanceof UzonEnum && wcNode.kind === "Identifier") {
-        const variantName = (wcNode as { name: string }).name;
-        if (scrutinee.variants.includes(variantName)) {
-          whenVal = new UzonEnum(variantName, scrutinee.variants, scrutinee.typeName);
-        } else {
-          whenVal = ctx.evalNode(wcNode, scope, exclude);
-        }
+    const wcNode = wc.value as AstNode;
+    if (wcNode.kind === "UndefinedLiteral") {
+      throw new UzonRuntimeError(
+        "'when undefined' is not allowed — use 'is undefined' check before 'case'",
+        wc.line, wc.col,
+      );
+    }
+    let whenVal: UzonValue;
+    if (scrutinee instanceof UzonEnum && wcNode.kind === "Identifier") {
+      const variantName = (wcNode as { name: string }).name;
+      if (scrutinee.variants.includes(variantName)) {
+        whenVal = new UzonEnum(variantName, scrutinee.variants, scrutinee.typeName);
       } else {
         whenVal = ctx.evalNode(wcNode, scope, exclude);
       }
-      if (whenVal === UZON_UNDEFINED) {
-        throw new UzonRuntimeError(
-          "'when' clause evaluated to undefined — use 'is undefined' check before 'case'",
-          wcNode.line, wcNode.col,
-        );
-      }
-      assertSameType(scrutinee, whenVal, wcNode);
-      if (takenResult === undefined && valuesEqual(scrutinee, whenVal)) {
-        takenResult = ctx.evalNode(wc.result, scope, exclude);
-        takenNumType = ctx.numericType;
-      }
+    } else {
+      whenVal = ctx.evalNode(wcNode, scope, exclude);
+    }
+    if (whenVal === UZON_UNDEFINED) {
+      throw new UzonRuntimeError(
+        "'when' clause evaluated to undefined — use 'is undefined' check before 'case'",
+        wcNode.line, wcNode.col,
+      );
+    }
+    assertSameType(scrutinee, whenVal, wcNode);
+    if (takenResult === undefined && valuesEqual(scrutinee, whenVal)) {
+      takenResult = ctx.evalNode(wc.result, scope, exclude);
+      takenNumType = ctx.numericType;
     }
   }
 
   const result = takenResult ?? ctx.evalNode(node.elseBranch, scope, exclude);
   const resultNumType = takenResult !== undefined ? takenNumType : ctx.numericType;
+  assertBranchTypes(ctx, node, result, takenResult !== undefined, scope, exclude);
+  ctx.numericType = resultNumType;
+  return result;
+}
 
-  // §5.10: All branch results must be the same type
+function evalCaseNamed(
+  ctx: EvalContext,
+  node: { whenClauses: WhenClause[]; elseBranch: AstNode; line: number; col: number },
+  scrutinee: UzonTaggedUnion,
+  scope: Scope, exclude?: string,
+): UzonValue {
+  let takenResult: UzonValue | undefined;
+  let takenNumType: string | null = null;
+
+  for (const wc of node.whenClauses) {
+    const variantName = wc.value as string;
+    let knownVariants: string[] | undefined;
+    if (scrutinee.variants.size > 0) {
+      knownVariants = [...scrutinee.variants.keys()];
+    } else if (scrutinee.typeName) {
+      const typeDef = scope.getType([scrutinee.typeName]);
+      if (typeDef && typeDef.variants) knownVariants = typeDef.variants;
+    }
+    if (knownVariants && !knownVariants.includes(variantName)) {
+      throw new UzonTypeError(
+        `'${variantName}' is not a valid variant of this tagged union (variants: ${knownVariants.join(", ")})`,
+        wc.line, wc.col,
+      );
+    }
+    if (takenResult === undefined && scrutinee.tag === variantName) {
+      takenResult = ctx.evalNode(wc.result, scope, exclude);
+      takenNumType = ctx.numericType;
+    }
+  }
+
+  const result = takenResult ?? ctx.evalNode(node.elseBranch, scope, exclude);
+  const resultNumType = takenResult !== undefined ? takenNumType : ctx.numericType;
+  assertBranchTypes(ctx, node, result, takenResult !== undefined, scope, exclude);
+  ctx.numericType = resultNumType;
+  return result;
+}
+
+function evalCaseType(
+  ctx: EvalContext,
+  node: { whenClauses: WhenClause[]; elseBranch: AstNode; line: number; col: number },
+  scrutinee: UzonUnion,
+  scope: Scope, exclude?: string,
+): UzonValue {
+  let takenResult: UzonValue | undefined;
+  let takenNumType: string | null = null;
+
+  const innerValue = scrutinee.value;
+  for (const wc of node.whenClauses) {
+    const typeName = wc.value as string;
+    if (takenResult === undefined && valueMatchesTypeName(innerValue, typeName)) {
+      takenResult = ctx.evalNode(wc.result, scope, exclude);
+      takenNumType = ctx.numericType;
+    }
+  }
+
+  const result = takenResult ?? ctx.evalNode(node.elseBranch, scope, exclude);
+  const resultNumType = takenResult !== undefined ? takenNumType : ctx.numericType;
+  assertBranchTypes(ctx, node, result, takenResult !== undefined, scope, exclude);
+  ctx.numericType = resultNumType;
+  return result;
+}
+
+function valueMatchesTypeName(value: UzonValue, typeName: string): boolean {
+  if (value === null) return typeName === "null";
+  if (typeof value === "boolean") return typeName === "bool";
+  if (typeof value === "string") return typeName === "string";
+  if (typeof value === "bigint") {
+    const intTypes = ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"];
+    return intTypes.includes(typeName);
+  }
+  if (typeof value === "number") {
+    const floatTypes = ["f16", "f32", "f64", "f128"];
+    return floatTypes.includes(typeName);
+  }
+  return false;
+}
+
+function assertBranchTypes(
+  ctx: EvalContext,
+  node: { whenClauses: WhenClause[]; elseBranch: AstNode; line: number; col: number },
+  result: UzonValue, hasTaken: boolean,
+  scope: Scope, exclude?: string,
+): void {
   for (const wc of node.whenClauses) {
     try {
       const branchResult = ctx.evalNode(wc.result, scope, exclude);
       if (result !== null && branchResult !== null
           && result !== UZON_UNDEFINED && branchResult !== UZON_UNDEFINED) {
-        assertSameType(result, branchResult, node as AstNode);
+        assertSameType(result, branchResult, node as unknown as AstNode);
       }
       if (Array.isArray(result) && result.length === 0 && Array.isArray(branchResult) && branchResult.length > 0) {
         const otherElemType = ctx.listElementTypes.get(branchResult);
@@ -185,12 +269,12 @@ export function evalCase(
       if (e instanceof UzonTypeError) throw e;
     }
   }
-  if (takenResult !== undefined) {
+  if (hasTaken) {
     try {
       const elseResult = ctx.evalNode(node.elseBranch, scope, exclude);
       if (result !== null && elseResult !== null
           && result !== UZON_UNDEFINED && elseResult !== UZON_UNDEFINED) {
-        assertSameType(result, elseResult, node as AstNode);
+        assertSameType(result, elseResult, node as unknown as AstNode);
       }
       if (Array.isArray(result) && result.length === 0 && Array.isArray(elseResult) && elseResult.length > 0) {
         const otherElemType = ctx.listElementTypes.get(elseResult);
@@ -200,7 +284,4 @@ export function evalCase(
       if (e instanceof UzonTypeError) throw e;
     }
   }
-
-  ctx.numericType = resultNumType;
-  return result;
 }

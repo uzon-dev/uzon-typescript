@@ -11,7 +11,7 @@
  *   17. or              — logical OR (left-assoc)
  *   16. and             — logical AND (left-assoc)
  *   15. not             — logical NOT (right-assoc)
- *   14. is / is not / is named / is not named — equality (non-assoc)
+ *   14. is / is not / is named / is not named / is type / is not type — equality (non-assoc)
  *   13. in              — membership (non-assoc)
  *   12. < <= > >=       — relational (non-assoc)
  *   11. ++              — concatenation (left-assoc)
@@ -21,12 +21,12 @@
  *    7. ^               — exponentiation (right-assoc)
  *   5–6. from / named   — enum, union, tagged union
  *    4. as              — type annotation (non-assoc)
- *    3. with / extends  — struct override / extension (non-assoc)
+ *    3. with / plus     — struct override / extension (non-assoc)
  *    2. to              — type conversion (non-assoc)
  *    1. . / ()          — member access / function call (left-assoc)
  */
 
-import { TokenType, Token } from "./token.js";
+import { TokenType, Token, KEYWORDS } from "./token.js";
 import { UzonSyntaxError } from "./error.js";
 import type {
   AstNode, BindingNode, DocumentNode,
@@ -41,6 +41,10 @@ import {
   parseStructLiteral, parseListLiteral, parseTupleOrGrouping,
   parseIfExpr, parseCaseExpr, parseStructImport,
 } from "./parse-compounds.js";
+
+
+/** Token types that are keywords — accepted as member names after `.`. */
+const KEYWORD_TOKEN_TYPES = new Set<TokenType>(Object.values(KEYWORDS));
 
 export class Parser implements ParseContext {
   tokens: Token[];
@@ -125,7 +129,21 @@ export class Parser implements ParseContext {
 
   private parseBinding(): BindingNode {
     this.skipNewlines();
-    const nameTok = this.expect(TokenType.Identifier, "binding name");
+    const nameTok = this.peek();
+    // §11.2: suggest @keyword escape when a keyword appears at binding position.
+    if (nameTok.type !== TokenType.Identifier && KEYWORD_TOKEN_TYPES.has(nameTok.type)) {
+      const next = this.peek(1);
+      if (next.type === TokenType.Is || next.type === TokenType.Are
+        || next.type === TokenType.IsNot || next.type === TokenType.IsNamed
+        || next.type === TokenType.IsNotNamed || next.type === TokenType.IsType
+        || next.type === TokenType.IsNotType) {
+        this.error(
+          `"${nameTok.value}" is a keyword; to use it as a binding name, write @${nameTok.value}`,
+          nameTok,
+        );
+      }
+    }
+    this.expect(TokenType.Identifier, "binding name");
     const name = nameTok.value;
 
     this.skipNewlines();
@@ -155,6 +173,25 @@ export class Parser implements ParseContext {
       this.tokens.splice(this.pos, 0,
         { type: TokenType.Not, value: "not", line: isTok.line, col: isTok.col },
         { type: TokenType.Named, value: "named", line: isTok.line, col: isTok.col },
+      );
+      const value = this.parseExpression();
+      const calledName = this.tryParseCalled();
+      return { kind: "Binding", name, value, calledName, line: nameTok.line, col: nameTok.col };
+    }
+    if (isTok.type === TokenType.IsType) {
+      this.advance();
+      this.tokens.splice(this.pos, 0, {
+        type: TokenType.Type, value: "type", line: isTok.line, col: isTok.col,
+      });
+      const value = this.parseExpression();
+      const calledName = this.tryParseCalled();
+      return { kind: "Binding", name, value, calledName, line: nameTok.line, col: nameTok.col };
+    }
+    if (isTok.type === TokenType.IsNotType) {
+      this.advance();
+      this.tokens.splice(this.pos, 0,
+        { type: TokenType.Not, value: "not", line: isTok.line, col: isTok.col },
+        { type: TokenType.Type, value: "type", line: isTok.line, col: isTok.col },
       );
       const value = this.parseExpression();
       const calledName = this.tryParseCalled();
@@ -306,7 +343,7 @@ export class Parser implements ParseContext {
     return this.parseEquality();
   }
 
-  // Level 14: is, is not, is named, is not named (§5.1, §3.7) — non-associative
+  // Level 14: is, is not, is named, is not named, is type, is not type (§5.1, §3.7, §5.2) — non-associative
   private parseEquality(): AstNode {
     let left = this.parseMembership();
 
@@ -339,6 +376,24 @@ export class Parser implements ParseContext {
       left = {
         kind: "BinaryOp", op: "is not named" as BinaryOp, left,
         right: { kind: "Identifier", name: nameTok.value, line: nameTok.line, col: nameTok.col },
+        line: op.line, col: op.col,
+      };
+    } else if (t === TokenType.IsType) {
+      const op = this.advance();
+      this.skipNewlines();
+      const typeExpr = this.parseTypeExpr();
+      left = {
+        kind: "BinaryOp", op: "is type" as BinaryOp, left,
+        right: typeExpr,
+        line: op.line, col: op.col,
+      };
+    } else if (t === TokenType.IsNotType) {
+      const op = this.advance();
+      this.skipNewlines();
+      const typeExpr = this.parseTypeExpr();
+      left = {
+        kind: "BinaryOp", op: "is not type" as BinaryOp, left,
+        right: typeExpr,
         line: op.line, col: op.col,
       };
     }
@@ -543,7 +598,7 @@ export class Parser implements ParseContext {
     return expr;
   }
 
-  // Level 3: with / extends (§3.2.1, §3.2.2) — non-associative, no chaining
+  // Level 3: with / plus (§3.2.1, §3.2.2) — non-associative, no chaining
   private parseStructOverride(): AstNode {
     let expr = this.parseConversion();
 
@@ -551,15 +606,15 @@ export class Parser implements ParseContext {
       const withTok = this.advance();
       const overrides = parseStructLiteral(this);
       expr = { kind: "StructOverride", base: expr, overrides, line: withTok.line, col: withTok.col };
-      if (this.peek().type === TokenType.With || this.peek().type === TokenType.Extends) {
-        this.error("Chaining 'with'/'extends' is not permitted — use an intermediate binding", this.peek());
+      if (this.peek().type === TokenType.With || this.peek().type === TokenType.PlusKw) {
+        this.error("Chaining 'with'/'plus' is not permitted — use an intermediate binding", this.peek());
       }
-    } else if (this.peek().type === TokenType.Extends) {
-      const extTok = this.advance();
+    } else if (this.peek().type === TokenType.PlusKw) {
+      const plusTok = this.advance();
       const extensions = parseStructLiteral(this);
-      expr = { kind: "StructExtend", base: expr, extensions, line: extTok.line, col: extTok.col };
-      if (this.peek().type === TokenType.With || this.peek().type === TokenType.Extends) {
-        this.error("Chaining 'with'/'extends' is not permitted — use an intermediate binding", this.peek());
+      expr = { kind: "StructPlus", base: expr, extensions, line: plusTok.line, col: plusTok.col };
+      if (this.peek().type === TokenType.With || this.peek().type === TokenType.PlusKw) {
+        this.error("Chaining 'with'/'plus' is not permitted — use an intermediate binding", this.peek());
       }
     }
 
@@ -587,10 +642,9 @@ export class Parser implements ParseContext {
       if (this.peek().type === TokenType.Dot) {
         const dotTok = this.advance();
         this.skipNewlines();
-        const memberTok = this.advance();
-        const member = memberTok.value;
+        const member = this.parseMemberName();
         expr = { kind: "MemberAccess", object: expr, member, line: dotTok.line, col: dotTok.col };
-      } else if (this.peek().type === TokenType.LParen) {
+      } else if (this.peekRaw().type === TokenType.LParen) {
         const lpTok = this.advance();
         const args: AstNode[] = [];
         this.skipNewlines();
@@ -621,11 +675,35 @@ export class Parser implements ParseContext {
     while (this.peek().type === TokenType.Dot) {
       const dotTok = this.advance();
       this.skipNewlines();
-      const memberTok = this.advance();
-      expr = { kind: "MemberAccess", object: expr, member: memberTok.value, line: dotTok.line, col: dotTok.col };
+      const member = this.parseMemberName();
+      expr = { kind: "MemberAccess", object: expr, member, line: dotTok.line, col: dotTok.col };
     }
 
     return expr;
+  }
+
+  /**
+   * Parse a member name after `.` — accepts identifiers, @keyword escapes,
+   * and bare keywords (§5.12, matching Go reference).
+   */
+  private parseMemberName(): string {
+    const tok = this.peek();
+    if (tok.type === TokenType.Identifier || tok.type === TokenType.Integer) {
+      this.advance();
+      return tok.value;
+    }
+    // @keyword escape in member position
+    if (tok.type === TokenType.At) {
+      this.advance(); // consume @
+      const kwTok = this.advance();
+      return kwTok.value;
+    }
+    // Bare keywords as member names
+    if (KEYWORD_TOKEN_TYPES.has(tok.type)) {
+      this.advance();
+      return tok.value;
+    }
+    this.error(`Expected member name, got ${TokenType[tok.type]}`, tok);
   }
 
   // ── Primary expressions ────────────────────────────────────
@@ -685,12 +763,26 @@ export class Parser implements ParseContext {
         return parseStructImport(this);
       case TokenType.Function:
         return parseFunctionExpr(this);
+      // §9 binding decomposition: keyword tokens that appear as primaries
+      // after composite Is* decomposition are treated as identifiers.
+      case TokenType.Named:
+      case TokenType.Type:
+        this.advance();
+        return { kind: "Identifier", name: tok.value, line: tok.line, col: tok.col };
       default:
         this.error(`Unexpected token: '${tok.value}' (${TokenType[tok.type]})`, tok);
     }
   }
 
   // ── Type expressions (§6) ─────────────────────────────────
+
+  /** Parse a type expression and return its string name (for case type / when). */
+  parseTypeExprAsString(): string {
+    const typeNode = this.parseTypeExpr();
+    if (typeNode.isNull) return "null";
+    if (typeNode.isList && typeNode.inner) return `[${typeNode.inner.path.join(".")}]`;
+    return typeNode.path.join(".");
+  }
 
   parseTypeExpr(): TypeExprNode {
     this.skipNewlines();
@@ -704,15 +796,28 @@ export class Parser implements ParseContext {
       return { kind: "TypeExpr", path: [], isList: true, inner, isNull: false, isTuple: false, tupleElements: null, line: lbrack.line, col: lbrack.col };
     }
 
-    // Tuple type: (Type, Type, ...)
+    // Tuple type or grouped type expression: (), (Type), (Type,), (Type, Type, ...)
     if (tok.type === TokenType.LParen) {
       const lparen = this.advance();
-      const elements: TypeExprNode[] = [];
       this.skipNewlines();
-      elements.push(this.parseTypeExpr());
-      if (this.peek().type !== TokenType.Comma) {
-        this.error("Tuple type requires at least two element types", this.peek());
+
+      // Empty tuple type: ()
+      if (this.peek().type === TokenType.RParen) {
+        this.advance();
+        return { kind: "TypeExpr", path: [], isList: false, inner: null, isNull: false, isTuple: true, tupleElements: [], line: lparen.line, col: lparen.col };
       }
+
+      const first = this.parseTypeExpr();
+      this.skipNewlines();
+
+      // Grouped type expression: (Type) — no comma, returns inner type directly
+      if (this.peek().type === TokenType.RParen) {
+        this.advance();
+        return first;
+      }
+
+      // Tuple type: (Type,) or (Type, Type, ...)
+      const elements: TypeExprNode[] = [first];
       while (this.peek().type === TokenType.Comma) {
         this.advance();
         this.skipNewlines();

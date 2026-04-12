@@ -696,27 +696,27 @@ describe("Evaluator", () => {
     });
   });
 
-  // ── Struct extends (§3.2.2) ───────────────────────────────────
+  // ── Struct plus (§3.2.2) ───────────────────────────────────
 
-  describe("struct extends", () => {
+  describe("struct plus", () => {
     it("adds new fields", () => {
-      const r = evaluate("base is { a is 1 }\nx is base extends { b is 2 }");
+      const r = evaluate("base is { a is 1 }\nx is base plus { b is 2 }");
       expect((r.x as any).a).toBe(1n);
       expect((r.x as any).b).toBe(2n);
     });
 
     it("override and add", () => {
-      const r = evaluate("base is { a is 1 }\nx is base extends { a is 10, b is 2 }");
+      const r = evaluate("base is { a is 1 }\nx is base plus { a is 10, b is 2 }");
       expect((r.x as any).a).toBe(10n);
       expect((r.x as any).b).toBe(2n);
     });
 
-    it("rejects extends with no new fields", () => {
-      expect(() => evaluate("base is { a is 1 }\nx is base extends { a is 2 }")).toThrow();
+    it("rejects plus with no new fields", () => {
+      expect(() => evaluate("base is { a is 1 }\nx is base plus { a is 2 }")).toThrow();
     });
 
-    it("rejects extends on non-struct", () => {
-      expect(() => evaluate("x is 42 extends { a is 1 }")).toThrow();
+    it("rejects plus on non-struct", () => {
+      expect(() => evaluate("x is 42 plus { a is 1 }")).toThrow();
     });
   });
 

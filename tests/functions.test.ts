@@ -200,11 +200,11 @@ describe("Functions (§3.8)", () => {
   });
 });
 
-describe("Struct Extend (§3.2.2)", () => {
+describe("Struct Plus (§3.2.2)", () => {
   it("adds new fields to a struct", () => {
     const r = evaluate(`
       base is { host is "localhost", port is 8080 }
-      extended is base extends { environment is "production" }
+      extended is base plus { environment is "production" }
     `);
     expect(r.extended).toEqual({
       host: "localhost",
@@ -216,7 +216,7 @@ describe("Struct Extend (§3.2.2)", () => {
   it("overrides existing fields and adds new ones", () => {
     const r = evaluate(`
       base is { host is "localhost", port is 8080 }
-      secure is base extends { port is 443, tls is true, cert is "/path" }
+      secure is base plus { port is 443, tls is true, cert is "/path" }
     `);
     expect(r.secure).toEqual({
       host: "localhost",
@@ -226,31 +226,31 @@ describe("Struct Extend (§3.2.2)", () => {
     });
   });
 
-  it("rejects extends with no new fields", () => {
+  it("rejects plus with no new fields", () => {
     expect(() => evaluate(`
       base is { x is 1, y is 2 }
-      alt is base extends { x is 10 }
+      alt is base plus { x is 10 }
     `)).toThrow(/new field/i);
   });
 
-  it("rejects extends on non-struct", () => {
+  it("rejects plus on non-struct", () => {
     expect(() => evaluate(`
       x is 42
-      result is x extends { a is 1 }
+      result is x plus { a is 1 }
     `)).toThrow(/struct/i);
   });
 
-  it("rejects type-incompatible override in extends", () => {
+  it("rejects type-incompatible override in plus", () => {
     expect(() => evaluate(`
       base is { x is 1, y is 2 }
-      result is base extends { x is "hello", z is 3 }
+      result is base plus { x is "hello", z is 3 }
     `)).toThrow(/type/i);
   });
 
   it("override field with null is allowed", () => {
     const r = evaluate(`
       base is { x is 1, y is 2 }
-      result is base extends { x is null, z is 3 }
+      result is base plus { x is null, z is 3 }
     `);
     expect(r.result).toEqual({ x: null, y: 2n, z: 3n });
   });
@@ -598,17 +598,17 @@ describe("With/Extends chaining prevention", () => {
     `)).toThrow(/chaining/i);
   });
 
-  it("rejects chained extends expressions", () => {
+  it("rejects chained plus expressions", () => {
     expect(() => evaluate(`
       base is { x is 1 }
-      result is base extends { y is 2 } extends { z is 3 }
+      result is base plus { y is 2 } plus { z is 3 }
     `)).toThrow(/chaining/i);
   });
 
-  it("rejects mixed with/extends chaining", () => {
+  it("rejects mixed with/plus chaining", () => {
     expect(() => evaluate(`
       base is { x is 1 }
-      result is base extends { y is 2 } with { x is 10 }
+      result is base plus { y is 2 } with { x is 10 }
     `)).toThrow(/chaining/i);
   });
 });

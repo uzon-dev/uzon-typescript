@@ -78,9 +78,13 @@ export class Lexer {
   private advance(n = 1): string {
     const slice = this.src.slice(this.pos, this.pos + n);
     for (let i = 0; i < n; i++) {
+      const code = this.src.charCodeAt(this.pos + i);
       if (this.src[this.pos + i] === "\n") {
         this.line++;
         this.col = 1;
+      } else if (code >= 0xdc00 && code <= 0xdfff) {
+        // §11.2: Low surrogate of a surrogate pair — already counted
+        // col for the high surrogate, so skip.
       } else {
         this.col++;
       }
@@ -576,7 +580,7 @@ export class Lexer {
     if (word in KEYWORDS) {
       const kwType = KEYWORDS[word];
 
-      // Composite operator lookahead: "or else", "is not", "is named", "is not named"
+      // Composite operator lookahead: "or else", "is not", "is named", "is not named", "is type", "is not type"
       if (kwType === TokenType.Or) {
         if (this.tryComposite("else")) {
           this.push(TokenType.OrElse, "or else", line, col);
@@ -589,11 +593,19 @@ export class Lexer {
             this.push(TokenType.IsNotNamed, "is not named", line, col);
             return;
           }
+          if (this.tryComposite("type")) {
+            this.push(TokenType.IsNotType, "is not type", line, col);
+            return;
+          }
           this.push(TokenType.IsNot, "is not", line, col);
           return;
         }
         if (this.tryComposite("named")) {
           this.push(TokenType.IsNamed, "is named", line, col);
+          return;
+        }
+        if (this.tryComposite("type")) {
+          this.push(TokenType.IsType, "is type", line, col);
           return;
         }
       }
@@ -611,16 +623,27 @@ export class Lexer {
 
   /**
    * Attempt to consume the next word if it matches `expected`.
-   * Skips horizontal whitespace only (not newlines). Restores position on failure.
+   * Skips whitespace (including newlines) and comments (§8, §9).
+   * Restores position on failure.
    */
   private tryComposite(expected: string): boolean {
     const savedPos = this.pos;
     const savedLine = this.line;
     const savedCol = this.col;
 
-    // Skip horizontal whitespace
+    // Skip whitespace (horizontal + newlines) and comments
     let p = this.pos;
-    while (p < this.src.length && (this.src[p] === " " || this.src[p] === "\t")) p++;
+    while (p < this.src.length) {
+      const c = this.src[p];
+      if (c === " " || c === "\t" || c === "\n" || c === "\r") {
+        p++;
+      } else if (c === "/" && this.src[p + 1] === "/") {
+        p += 2;
+        while (p < this.src.length && this.src[p] !== "\n") p++;
+      } else {
+        break;
+      }
+    }
 
     // Read next word
     let end = p;

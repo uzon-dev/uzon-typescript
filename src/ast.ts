@@ -92,6 +92,7 @@ export type BinaryOp =
   | "<" | "<=" | ">" | ">="
   | "and" | "or"
   | "is" | "is not" | "is named" | "is not named"
+  | "is type" | "is not type"
   | "in";
 
 export interface BinaryOpNode extends NodeBase {
@@ -124,14 +125,14 @@ export interface IfExprNode extends NodeBase {
 
 /** A single `when` arm inside a `case` expression (§5.10) */
 export interface WhenClause extends NodeBase {
-  isNamed: boolean;
-  value: AstNode | string;  // string when isNamed (variant name)
+  value: AstNode | string;  // string when mode is "named" (variant name) or "type" (type name)
   result: AstNode;
 }
 
-/** Pattern-matching expression: `case x when ... else ...` (§5.10) */
+/** Pattern-matching expression: `case [type|named] x when ... else ...` (§5.10) */
 export interface CaseExprNode extends NodeBase {
   kind: "CaseExpr";
+  mode: "value" | "type" | "named";
   scrutinee: AstNode;
   whenClauses: WhenClause[];
   elseBranch: AstNode;
@@ -171,9 +172,9 @@ export interface StructOverrideNode extends NodeBase {
   overrides: StructLiteralNode;
 }
 
-/** Struct extension: `base extends { ... }` (§3.2.2) */
-export interface StructExtendNode extends NodeBase {
-  kind: "StructExtend";
+/** Struct extension: `base plus { ... }` (§3.2.2) */
+export interface StructPlusNode extends NodeBase {
+  kind: "StructPlus";
   base: AstNode;
   extensions: StructLiteralNode;
 }
@@ -294,7 +295,7 @@ export type AstNode =
   | TypeAnnotationNode
   | ConversionNode
   | StructOverrideNode
-  | StructExtendNode
+  | StructPlusNode
   | FromEnumNode
   | FromUnionNode
   | NamedVariantNode

@@ -46,7 +46,7 @@ import {
   evalFunctionExpr, evalFunctionCall, callFunctionDirect as callFunctionDirectImpl,
 } from "./eval-functions.js";
 import { evalOrElse, evalIf, evalCase } from "./eval-control.js";
-import { evalStructOverride, evalStructExtend } from "./eval-structs.js";
+import { evalStructOverride, evalStructPlus } from "./eval-structs.js";
 import {
   typeCategory, typeTag, listElementCategory,
   valueToString, typeExprToString,
@@ -189,6 +189,7 @@ export class Evaluator implements EvalContext {
   /** Step 3: Pre-evaluation validation of bindings. */
   private validateBindings(bindings: BindingNode[]): void {
     for (const b of bindings) {
+      // §3.1: literal `undefined` cannot appear on the RHS of `is` in a binding.
       if (b.value.kind === "UndefinedLiteral") {
         throw new UzonSyntaxError(
           `Cannot assign literal 'undefined' to '${b.name}' — undefined is a state, not a value`,
@@ -333,7 +334,7 @@ export class Evaluator implements EvalContext {
       case "TypeAnnotation": return evalTypeAnnotation(this, node, scope, exclude);
       case "Conversion": return evalConversion(this, node, scope, exclude);
       case "StructOverride": return evalStructOverride(this, node, scope, exclude);
-      case "StructExtend": return evalStructExtend(this, node, scope, exclude);
+      case "StructPlus": return evalStructPlus(this, node, scope, exclude);
       case "FromEnum": return this.evalFromEnum(node, scope, exclude);
       case "FromUnion": return this.evalFromUnion(node, scope, exclude);
       case "NamedVariant": return this.evalNamedVariant(node, scope, exclude);
@@ -515,6 +516,14 @@ export class Evaluator implements EvalContext {
     if (node.variants.length < 2) {
       throw new UzonTypeError("An enum must have at least two variants", node.line, node.col);
     }
+    // §3.5/§9: duplicate variant names are a type error.
+    const seen = new Set<string>();
+    for (const v of node.variants) {
+      if (seen.has(v)) {
+        throw new UzonTypeError(`duplicate variant "${v}" in enum`, node.line, node.col);
+      }
+      seen.add(v);
+    }
     let variantName: string;
     if (node.value.kind === "Identifier") {
       variantName = node.value.name;
@@ -541,6 +550,15 @@ export class Evaluator implements EvalContext {
   ): UzonValue {
     if (node.types.length < 2) {
       throw new UzonTypeError("A union must have at least two member types", node.line, node.col);
+    }
+    // §3.6: duplicate member types in union are a type error.
+    const seenTypes = new Set<string>();
+    for (const t of node.types) {
+      const name = t.path.join(".");
+      if (name && seenTypes.has(name)) {
+        throw new UzonTypeError(`duplicate type "${name}" in union`, node.line, node.col);
+      }
+      seenTypes.add(name);
     }
     const val = this.evalNode(node.value, scope, exclude);
     if (val === UZON_UNDEFINED) {
@@ -574,7 +592,13 @@ export class Evaluator implements EvalContext {
       if (node.variants.length < 2) {
         throw new UzonTypeError("A tagged union must have at least two variants", node.line, node.col);
       }
+      // §3.5/§9: duplicate variant names are a type error.
+      const seenNames = new Set<string>();
       for (const [name, type] of node.variants) {
+        if (seenNames.has(name)) {
+          throw new UzonTypeError(`duplicate variant "${name}" in tagged union`, node.line, node.col);
+        }
+        seenNames.add(name);
         variants.set(name, type.isNull ? null : typeExprToString(type));
       }
     } else if (node.value.kind === "TypeAnnotation") {

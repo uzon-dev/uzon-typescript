@@ -7,7 +7,7 @@
  * (parameters, return type, body with local bindings).
  */
 
-import { TokenType } from "./token.js";
+import { TokenType, KEYWORDS } from "./token.js";
 import type { AstNode, BindingNode, FunctionParam } from "./ast.js";
 import type { ParseContext } from "./parse-context.js";
 
@@ -58,6 +58,9 @@ function parseFunctionParam(ctx: ParseContext): FunctionParam {
   ctx.skipNewlines();
   const nameTok = ctx.advance();
   if (nameTok.type !== TokenType.Identifier) {
+    if (nameTok.value in KEYWORDS) {
+      ctx.error(`"${nameTok.value}" is a keyword; to use it as a parameter name, write @${nameTok.value}`, nameTok);
+    }
     ctx.error("Expected parameter name", nameTok);
   }
   ctx.expect(TokenType.As, "'as' after parameter name");
@@ -76,7 +79,9 @@ function parseFunctionBody(ctx: ParseContext): { bindings: BindingNode[]; finalE
   const bindings: BindingNode[] = [];
   ctx.skipNewlines();
 
-  // 2-token lookahead: `identifier is` means binding; otherwise it's the final expression
+  // 2-token lookahead: `identifier is` means binding; otherwise it's the final expression.
+  // Only plain Is/Are trigger bindings — composite operators (IsNamed, IsType, etc.)
+  // are expression operators, not binding starts (matches Go reference implementation).
   while (ctx.peek().type !== TokenType.RBrace) {
     if (ctx.peek().type === TokenType.Identifier && ctx.peek(1).type === TokenType.Is) {
       bindings.push(parseFuncBinding(ctx));
