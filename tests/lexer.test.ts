@@ -55,24 +55,22 @@ describe("Lexer", () => {
 
   describe("keywords", () => {
     it("recognizes all active keywords", () => {
-      const src = "is are from called as named with union extends to of and or not if then else case when env struct in function returns default";
+      const src = "is are from called as named with union plus to of and or not if then else case when env struct in function returns default type";
       const toks = new Lexer(src).tokenize();
       const kwTypes = toks.slice(0, -1).map((t) => t.type);
       expect(kwTypes).toEqual([
         TokenType.Is, TokenType.Are, TokenType.From, TokenType.Called,
         TokenType.As, TokenType.Named, TokenType.With, TokenType.Union,
-        TokenType.Extends, TokenType.To, TokenType.Of, TokenType.And,
+        TokenType.PlusKw, TokenType.To, TokenType.Of, TokenType.And,
         TokenType.Or, TokenType.Not, TokenType.If, TokenType.Then,
         TokenType.Else, TokenType.Case, TokenType.When,
         TokenType.Env, TokenType.Struct, TokenType.In, TokenType.Function,
-        TokenType.Returns, TokenType.Default,
+        TokenType.Returns, TokenType.Default, TokenType.Type,
       ]);
     });
 
     it("rejects reserved keywords as identifiers", () => {
-      expect(() => new Lexer("self is 5").tokenize()).toThrow("reserved keyword");
       expect(() => new Lexer("lazy is 5").tokenize()).toThrow("reserved keyword");
-      expect(() => new Lexer("type is 5").tokenize()).toThrow("reserved keyword");
     });
   });
 

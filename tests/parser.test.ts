@@ -311,10 +311,10 @@ describe("Parser", () => {
       if (v.kind === "CaseExpr") expect(v.whenClauses).toHaveLength(2);
     });
 
-    it("when named variant", () => {
-      const v = firstValue('x is case tu\n  when named ok then "ok"\n  else "other"');
+    it("case named variant", () => {
+      const v = firstValue('x is case named tu\n  when ok then "ok"\n  else "other"');
       expect(v.kind).toBe("CaseExpr");
-      if (v.kind === "CaseExpr") expect(v.whenClauses[0].isNamed).toBe(true);
+      if (v.kind === "CaseExpr") expect((v as any).mode).toBe("named");
     });
 
     it("rejects case with zero when clauses", () => {
@@ -365,17 +365,17 @@ describe("Parser", () => {
       expect(firstValue("x is base with { debug is true }")).toMatchObject({ kind: "StructOverride" });
     });
 
-    it("rejects chaining with/extends", () => {
+    it("rejects chaining with/plus", () => {
       expect(() => parse("x is a with { b is 1 } with { c is 2 }")).toThrow("Chaining");
-      expect(() => parse("x is a with { b is 1 } extends { c is 2 }")).toThrow("Chaining");
+      expect(() => parse("x is a with { b is 1 } plus { c is 2 }")).toThrow("Chaining");
     });
   });
 
-  // ── extends (struct extension) (§3.2.2) ──────────────────
+  // ── plus (struct extension) (§3.2.2) ──────────────────
 
   describe("struct extension", () => {
-    it("parses extends clause", () => {
-      expect(firstValue("x is base extends { extra is true }")).toMatchObject({ kind: "StructExtend" });
+    it("parses plus clause", () => {
+      expect(firstValue("x is base plus { extra is true }")).toMatchObject({ kind: "StructPlus" });
     });
   });
 

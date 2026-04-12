@@ -44,6 +44,9 @@ export function evalBinaryOp(
   // is named / is not named
   if (op === "is named" || op === "is not named") return evalIsNamed(ctx, node, scope, exclude);
 
+  // is type / is not type
+  if (op === "is type" || op === "is not type") return evalIsTypeOp(ctx, node, scope, exclude);
+
   // Membership
   if (op === "in") return evalInOp(ctx, node, scope, exclude);
 
@@ -209,6 +212,53 @@ function evalIsNamed(
   }
   const matches = left.tag === variantName;
   return node.op === "is named" ? matches : !matches;
+}
+
+// ── Type check operator ──
+
+function evalIsTypeOp(
+  ctx: EvalContext,
+  node: { op: BinaryOp; left: AstNode; right: AstNode; line: number; col: number },
+  scope: Scope, exclude?: string,
+): boolean {
+  const left = ctx.evalNode(node.left, scope, exclude);
+  if (left === UZON_UNDEFINED) {
+    throw new UzonRuntimeError("'is type' operand resolved to undefined", node.line, node.col);
+  }
+  const typeNode = node.right as { path?: string[]; isNull?: boolean };
+  const typeName = typeNode.isNull ? "null" : (typeNode.path?.join(".") ?? "");
+  const matches = valueMatchesType(left, typeName);
+  return node.op === "is type" ? matches : !matches;
+}
+
+function valueMatchesType(value: UzonValue, typeName: string): boolean {
+  // Unwrap unions to check inner value's type
+  if (value instanceof UzonUnion) return valueMatchesType(value.value, typeName);
+  if (value instanceof UzonTaggedUnion) return valueMatchesType(value.value, typeName);
+
+  if (value === null) return typeName === "null";
+  if (typeof value === "boolean") return typeName === "bool";
+  if (typeof value === "string") return typeName === "string";
+  if (typeof value === "bigint") {
+    if (typeName === "i64") return true; // default integer type
+    const intTypes = ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"];
+    return intTypes.includes(typeName);
+  }
+  if (typeof value === "number") {
+    if (typeName === "f64") return true; // default float type
+    const floatTypes = ["f16", "f32", "f64", "f128"];
+    return floatTypes.includes(typeName);
+  }
+  if (Array.isArray(value)) return typeName.startsWith("[");
+  if (value instanceof UzonEnum) {
+    if (value.typeName && value.typeName === typeName) return true;
+    return false;
+  }
+  if (typeof value === "object") {
+    // Struct — check named type
+    return false;
+  }
+  return false;
 }
 
 // ── Membership operator ──

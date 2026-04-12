@@ -57,7 +57,7 @@ function walkDeps(node: AstNode, deps: Set<string>, scopeNames: Set<string>): vo
       walkDeps(node.base, deps, scopeNames);
       for (const f of node.overrides.fields) walkDeps(f.value, deps, scopeNames);
       break;
-    case "StructExtend":
+    case "StructPlus":
       walkDeps(node.base, deps, scopeNames);
       for (const f of node.extensions.fields) walkDeps(f.value, deps, scopeNames);
       break;

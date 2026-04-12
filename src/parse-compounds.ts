@@ -92,9 +92,20 @@ export function parseIfExpr(ctx: ParseContext): IfExprNode {
   return { kind: "IfExpr", condition, thenBranch, elseBranch, line: ifTok.line, col: ifTok.col };
 }
 
-/** §5.10: case expr when value then expr ... else expr */
+/** §5.10: case [type|named] expr when value then expr ... else expr */
 export function parseCaseExpr(ctx: ParseContext): CaseExprNode {
   const caseTok = ctx.expect(TokenType.Case, "'case'");
+
+  // Determine case mode: value, type, or named
+  let mode: "value" | "type" | "named" = "value";
+  if (ctx.peek().type === TokenType.Type) {
+    ctx.advance();
+    mode = "type";
+  } else if (ctx.peek().type === TokenType.Named) {
+    ctx.advance();
+    mode = "named";
+  }
+
   const scrutinee = ctx.parseExpression();
 
   const whenClauses: WhenClause[] = [];
@@ -103,20 +114,19 @@ export function parseCaseExpr(ctx: ParseContext): CaseExprNode {
     const whenTok = ctx.advance();
     ctx.skipNewlines();
 
-    let isNamed = false;
     let value: AstNode | string;
 
-    if (ctx.peek().type === TokenType.Named) {
-      ctx.advance();
-      isNamed = true;
+    if (mode === "named") {
       value = ctx.parseVariantName();
+    } else if (mode === "type") {
+      value = ctx.parseTypeExprAsString();
     } else {
       value = ctx.parseExpression();
     }
 
     ctx.expect(TokenType.Then, "'then'");
     const result = ctx.parseExpression();
-    whenClauses.push({ isNamed, value, result, line: whenTok.line, col: whenTok.col });
+    whenClauses.push({ value, result, line: whenTok.line, col: whenTok.col });
     ctx.skipNewlines();
   }
 
@@ -128,7 +138,7 @@ export function parseCaseExpr(ctx: ParseContext): CaseExprNode {
   ctx.expect(TokenType.Else, "'else'");
   const elseBranch = ctx.parseExpression();
 
-  return { kind: "CaseExpr", scrutinee, whenClauses, elseBranch, line: caseTok.line, col: caseTok.col };
+  return { kind: "CaseExpr", mode, scrutinee, whenClauses, elseBranch, line: caseTok.line, col: caseTok.col };
 }
 
 // ── Struct import (§7) ──

@@ -67,7 +67,7 @@ evens is std.filter(numbers, function n as i64 returns bool { n % 2 is 0 })
 
 // Struct override and extension
 production is base with { debug is false }
-point3d is point extends { z is 0 as i32 }
+point3d is point plus { z is 0 as i32 }
 
 // Conversions and environment variables
 port is env.PORT to u16 or else 8080

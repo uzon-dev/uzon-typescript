@@ -147,22 +147,22 @@ export function evalStructOverride(
   return result;
 }
 
-// ── Struct extend (extends) ──
+// ── Struct plus (plus) ──
 
-export function evalStructExtend(
+export function evalStructPlus(
   ctx: EvalContext,
-  node: { kind: "StructExtend"; base: AstNode; extensions: { fields: BindingNode[] }; line: number; col: number },
+  node: { kind: "StructPlus"; base: AstNode; extensions: { fields: BindingNode[] }; line: number; col: number },
   scope: Scope, exclude?: string,
 ): UzonValue {
   const base = ctx.evalNode(node.base, scope, exclude);
   if (base === UZON_UNDEFINED) {
-    throw new UzonRuntimeError("Base expression for 'extends' evaluated to undefined", node.line, node.col);
+    throw new UzonRuntimeError("Base expression for 'plus' evaluated to undefined", node.line, node.col);
   }
   if (base === null || typeof base !== "object" || Array.isArray(base)
       || base instanceof UzonEnum || base instanceof UzonUnion
       || base instanceof UzonTaggedUnion || base instanceof UzonTuple
       || base instanceof UzonFunction) {
-    throw new UzonTypeError("'extends' requires a struct", node.line, node.col);
+    throw new UzonTypeError("'plus' requires a struct", node.line, node.col);
   }
 
   const baseObj = base as Record<string, UzonValue>;
@@ -175,7 +175,7 @@ export function evalStructExtend(
   }
   if (!hasNewField) {
     throw new UzonTypeError(
-      "'extends' must add at least one new field — use 'with' for override-only operations",
+      "'plus' must add at least one new field — use 'with' for override-only operations",
       node.line, node.col,
     );
   }
@@ -185,7 +185,7 @@ export function evalStructExtend(
     const val = ctx.evalNode(field.value, scope, exclude);
     const overrideNumType = ctx.numericType;
     if (val === UZON_UNDEFINED) {
-      throw new UzonRuntimeError(`Field '${field.name}' in 'extends' resolved to undefined`, field.line, field.col);
+      throw new UzonRuntimeError(`Field '${field.name}' in 'plus' resolved to undefined`, field.line, field.col);
     }
     // Existing field override — same type compatibility rules as 'with'
     if (field.name in baseObj) {
