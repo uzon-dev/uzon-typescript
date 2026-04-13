@@ -691,9 +691,79 @@ export class Evaluator implements EvalContext {
             );
           }
         }
+        // §3.4 + §3.2.1: Struct elements must have same shape and named type
+        if (inferredCat === "struct") {
+          this.validateListStructHomogeneity(result, node);
+        }
       }
     }
     return result;
+  }
+
+  private validateListStructHomogeneity(
+    result: UzonValue[],
+    node: { elements: AstNode[]; line: number; col: number },
+  ): void {
+    // Find first non-null struct element as reference
+    let refIdx = -1;
+    let refStruct: Record<string, UzonValue> | null = null;
+    for (let i = 0; i < result.length; i++) {
+      if (result[i] !== null && typeof result[i] === "object" && !Array.isArray(result[i])) {
+        refIdx = i;
+        refStruct = result[i] as Record<string, UzonValue>;
+        break;
+      }
+    }
+    if (refStruct === null) return;
+
+    const refKeys = Object.keys(refStruct);
+    const refTypeName = this.structTypeNames.get(refStruct) ?? null;
+
+    for (let i = refIdx + 1; i < result.length; i++) {
+      if (result[i] === null) continue;
+      const elem = result[i] as Record<string, UzonValue>;
+      const elemKeys = Object.keys(elem);
+
+      // Check named type compatibility (§3.2.1 rule 5)
+      const elemTypeName = this.structTypeNames.get(elem) ?? null;
+      if (refTypeName !== elemTypeName) {
+        const refDesc = refTypeName ?? "anonymous struct";
+        const elemDesc = elemTypeName ?? "anonymous struct";
+        throw new UzonTypeError(
+          `List element ${i} is ${elemDesc} but expected ${refDesc} — all struct elements must have the same type`,
+          node.elements[i].line, node.elements[i].col,
+        );
+      }
+
+      // Check same field names (§3.2.1 rule 4)
+      if (elemKeys.length !== refKeys.length) {
+        throw new UzonTypeError(
+          `List element ${i} has ${elemKeys.length} fields but expected ${refKeys.length} — all struct elements must have the same shape`,
+          node.elements[i].line, node.elements[i].col,
+        );
+      }
+      for (const key of refKeys) {
+        if (!(key in elem)) {
+          throw new UzonTypeError(
+            `List element ${i} is missing field '${key}' — all struct elements must have the same shape`,
+            node.elements[i].line, node.elements[i].col,
+          );
+        }
+      }
+
+      // Check same field value types
+      for (const key of refKeys) {
+        const refValCat = typeCategory(refStruct[key]);
+        const elemValCat = typeCategory(elem[key]);
+        if (refValCat === "null" || elemValCat === "null") continue;
+        if (refValCat !== elemValCat) {
+          throw new UzonTypeError(
+            `List element ${i} field '${key}' is ${elemValCat} but expected ${refValCat} — all struct elements must have the same field types`,
+            node.elements[i].line, node.elements[i].col,
+          );
+        }
+      }
+    }
   }
 
   private evalTuple(
