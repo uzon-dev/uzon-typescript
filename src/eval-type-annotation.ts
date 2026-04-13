@@ -110,6 +110,11 @@ export function evalTypeAnnotation(
     return annotateAsNamedList(ctx, val, typeDef, typeName, node);
   }
 
+  // §6.2: If not a built-in type and not found in scope, it's an unknown type
+  if (!typeDef) {
+    validateTypeExists(node.type, scope, node as AstNode);
+  }
+
   // Cross-category type validation (§6.1) — primitives and numeric widths
   return annotatePrimitive(ctx, val, typeName, node as AstNode);
 }
@@ -480,9 +485,15 @@ function valueMatchesMemberType(val: UzonValue, memberType: string): boolean {
   return false;
 }
 
-function validateTypeExists(type: TypeExprNode, scope: Scope, node: AstNode): void {
+export function validateTypeExists(type: TypeExprNode, scope: Scope, node: AstNode): void {
   if (type.isList) {
     if (type.inner) validateTypeExists(type.inner, scope, node);
+    return;
+  }
+  if (type.isTuple) {
+    if (type.tupleElements) {
+      for (const elem of type.tupleElements) validateTypeExists(elem, scope, node);
+    }
     return;
   }
   if (type.isNull) return;

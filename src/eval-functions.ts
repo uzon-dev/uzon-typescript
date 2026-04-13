@@ -18,6 +18,7 @@ import { validateIntegerType, validateFloatType } from "./eval-numeric.js";
 import { evalStdCall } from "./eval-stdlib.js";
 import type { EvalContext } from "./eval-context.js";
 import { typeTag, typeExprToString } from "./eval-helpers.js";
+import { validateTypeExists } from "./eval-type-annotation.js";
 
 // ── Function expression ──
 
@@ -40,6 +41,12 @@ export function evalFunctionExpr(
       );
     }
   }
+
+  // §6.2: Validate parameter and return types exist in scope at definition time
+  for (const p of node.params) {
+    validateTypeExists(p.type, scope, node as AstNode);
+  }
+  validateTypeExists(node.returnType, scope, node as AstNode);
 
   const paramNames = node.params.map(p => p.name);
   const paramTypes = node.params.map(p => typeExprToString(p.type));

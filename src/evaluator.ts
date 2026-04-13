@@ -657,12 +657,6 @@ export class Evaluator implements EvalContext {
   ): UzonValue {
     const childScope = new Scope(scope);
     this.evaluateBindings(node.fields, childScope);
-    // §3.2: Type definitions inside struct are accessible from parent scope
-    for (const [typeName, typeDef] of childScope.ownTypes()) {
-      if (!scope.hasOwnType(typeName)) {
-        scope.setType(typeName, typeDef);
-      }
-    }
     const result: Record<string, UzonValue> = {};
     for (const f of node.fields) {
       const val = childScope.get(f.name)!;
