@@ -9,6 +9,12 @@ import {
 } from "../src/index.js";
 import type { UzonValue } from "../src/index.js";
 
+function mustParse(src: string): Record<string, UzonValue> {
+  const r = parse(src);
+  if (r.errors) throw r.errors[0];
+  return r.value;
+}
+
 // ── valueOf / toString ──────────────────────────────────────────
 
 describe("valueOf / toString", () => {
@@ -38,32 +44,32 @@ describe("valueOf / toString", () => {
 
 describe("asNumber", () => {
   it("float → number", () => {
-    const r = parse("x is 3.14");
+    const r = mustParse("x is 3.14");
     expect(asNumber(r.x)).toBe(3.14);
   });
 
   it("integer (bigint) → number", () => {
-    const r = parse("x is 42");
+    const r = mustParse("x is 42");
     expect(asNumber(r.x)).toBe(42);
   });
 
   it("inf → Infinity", () => {
-    const r = parse("x is inf");
+    const r = mustParse("x is inf");
     expect(asNumber(r.x)).toBe(Infinity);
   });
 
   it("unwraps tagged union", () => {
-    const r = parse("x is 7 named high from high as i32, low as i32");
+    const r = mustParse("x is 7 named high from high as i32, low as i32");
     expect(asNumber(r.x)).toBe(7);
   });
 
   it("throws on string", () => {
-    const r = parse('x is "hello"');
+    const r = mustParse('x is "hello"');
     expect(() => asNumber(r.x)).toThrow("Expected a number, got string");
   });
 
   it("throws on null", () => {
-    const r = parse("x is null");
+    const r = mustParse("x is null");
     expect(() => asNumber(r.x)).toThrow("Expected a number, got null");
   });
 });
@@ -72,12 +78,12 @@ describe("asNumber", () => {
 
 describe("asInteger", () => {
   it("bigint → bigint", () => {
-    const r = parse("x is 42");
+    const r = mustParse("x is 42");
     expect(asInteger(r.x)).toBe(42n);
   });
 
   it("throws on float", () => {
-    const r = parse("x is 3.14");
+    const r = mustParse("x is 3.14");
     expect(() => asInteger(r.x)).toThrow("Expected an integer, got float");
   });
 });
@@ -86,17 +92,17 @@ describe("asInteger", () => {
 
 describe("asString", () => {
   it("string → string", () => {
-    const r = parse('x is "hello"');
+    const r = mustParse('x is "hello"');
     expect(asString(r.x)).toBe("hello");
   });
 
   it("enum → variant name", () => {
-    const r = parse("x is red from red, green, blue");
+    const r = mustParse("x is red from red, green, blue");
     expect(asString(r.x)).toBe("red");
   });
 
   it("throws on integer", () => {
-    const r = parse("x is 42");
+    const r = mustParse("x is 42");
     expect(() => asString(r.x)).toThrow("Expected a string, got integer");
   });
 });
@@ -105,17 +111,17 @@ describe("asString", () => {
 
 describe("asBool", () => {
   it("true → true", () => {
-    const r = parse("x is true");
+    const r = mustParse("x is true");
     expect(asBool(r.x)).toBe(true);
   });
 
   it("false → false", () => {
-    const r = parse("x is false");
+    const r = mustParse("x is false");
     expect(asBool(r.x)).toBe(false);
   });
 
   it("throws on string", () => {
-    const r = parse('x is "true"');
+    const r = mustParse('x is "true"');
     expect(() => asBool(r.x)).toThrow("Expected a bool, got string");
   });
 });
@@ -124,14 +130,14 @@ describe("asBool", () => {
 
 describe("asList", () => {
   it("list → array", () => {
-    const r = parse("x is [1, 2, 3]");
+    const r = mustParse("x is [1, 2, 3]");
     const list = asList(r.x);
     expect(list).toHaveLength(3);
     expect(list[0]).toBe(1n);
   });
 
   it("throws on tuple", () => {
-    const r = parse("x is (1, 2)");
+    const r = mustParse("x is (1, 2)");
     expect(() => asList(r.x)).toThrow("Expected a list, got tuple");
   });
 });
@@ -140,14 +146,14 @@ describe("asList", () => {
 
 describe("asTuple", () => {
   it("tuple → UzonTuple", () => {
-    const r = parse("x is (1, 2, 3)");
+    const r = mustParse("x is (1, 2, 3)");
     const t = asTuple(r.x);
     expect(t).toBeInstanceOf(UzonTuple);
     expect(t.length).toBe(3);
   });
 
   it("throws on list", () => {
-    const r = parse("x is [1, 2, 3]");
+    const r = mustParse("x is [1, 2, 3]");
     expect(() => asTuple(r.x)).toThrow("Expected a tuple, got list");
   });
 });
@@ -156,14 +162,14 @@ describe("asTuple", () => {
 
 describe("asStruct", () => {
   it("struct → object", () => {
-    const r = parse('x is { name is "test", port is 8080 }');
+    const r = mustParse('x is { name is "test", port is 8080 }');
     const s = asStruct(r.x);
     expect(s.name).toBe("test");
     expect(s.port).toBe(8080n);
   });
 
   it("throws on list", () => {
-    const r = parse("x is [1, 2]");
+    const r = mustParse("x is [1, 2]");
     expect(() => asStruct(r.x)).toThrow("Expected a struct, got list");
   });
 });
@@ -172,7 +178,7 @@ describe("asStruct", () => {
 
 describe("asEnum", () => {
   it("enum → UzonEnum", () => {
-    const r = parse("x is red from red, green, blue called Color");
+    const r = mustParse("x is red from red, green, blue called Color");
     const e = asEnum(r.x);
     expect(e).toBeInstanceOf(UzonEnum);
     expect(e.value).toBe("red");
@@ -180,7 +186,7 @@ describe("asEnum", () => {
   });
 
   it("throws on string", () => {
-    const r = parse('x is "red"');
+    const r = mustParse('x is "red"');
     expect(() => asEnum(r.x)).toThrow("Expected an enum, got string");
   });
 });

@@ -20,12 +20,18 @@ import {
   // Classes
   UzonEnum, UzonUnion, UzonTaggedUnion, UzonTuple, UZON_UNDEFINED,
 } from "../src/index.js";
-import type { UzonValue } from "../src/index.js";
+import type { ParseOptions, UzonValue } from "../src/index.js";
+
+function mustParse(src: string, opts?: ParseOptions): Record<string, UzonValue> {
+  const r = parse(src, opts);
+  if (r.errors) throw r.errors[0];
+  return r.value;
+}
 
 // ── Type Guards ─────────────────────────────────────────────────
 
 describe("type guards", () => {
-  const r = parse('n is null\nb is true\ni is 42\nf is 3.14\ns is "hello"\nlist is [1, 2]\ntup is (1, 2)\ne is red from red, green, blue');
+  const r = mustParse('n is null\nb is true\ni is 42\nf is 3.14\ns is "hello"\nlist is [1, 2]\ntup is (1, 2)\ne is red from red, green, blue');
 
   it("isNull", () => {
     expect(isNull(r.n)).toBe(true);
@@ -91,7 +97,7 @@ describe("type guards", () => {
   });
 
   it("isStruct", () => {
-    const r2 = parse('x is { a is 1 }');
+    const r2 = mustParse('x is { a is 1 }');
     expect(isStruct(r2.x)).toBe(true);
     expect(isStruct(r.list)).toBe(false);
   });
@@ -100,7 +106,7 @@ describe("type guards", () => {
 // ── Optional Helpers ────────────────────────────────────────────
 
 describe("optional helpers", () => {
-  const r = parse('i is 42\ns is "hello"\nb is true\nf is 3.14\nlist is [1]\ntup is (1, 2)\nst is { x is 1 }\ne is red from red, green, blue');
+  const r = mustParse('i is 42\ns is "hello"\nb is true\nf is 3.14\nlist is [1]\ntup is (1, 2)\nst is { x is 1 }\ne is red from red, green, blue');
 
   it("optionalNumber returns number on match", () => {
     expect(optionalNumber(r.i)).toBe(42);
@@ -159,7 +165,7 @@ describe("optional helpers", () => {
 // ── Deep Access ─────────────────────────────────────────────────
 
 describe("get / getOrThrow", () => {
-  const r = parse(`
+  const r = mustParse(`
     config is {
       database is {
         host is "localhost"
@@ -195,7 +201,7 @@ describe("get / getOrThrow", () => {
   });
 
   it("returns undefined for null", () => {
-    const r2 = parse("x is { a is null }");
+    const r2 = mustParse("x is { a is null }");
     expect(get(r2.x, "a.b")).toBeUndefined();
   });
 
@@ -208,7 +214,7 @@ describe("get / getOrThrow", () => {
   });
 
   it("tuple indexing", () => {
-    const r2 = parse("x is (10, 20, 30)");
+    const r2 = mustParse("x is (10, 20, 30)");
     expect(get(r2.x, "[1]")).toBe(20n);
   });
 
@@ -223,7 +229,7 @@ describe("get / getOrThrow", () => {
 
 describe("match", () => {
   it("matches tagged union by tag", () => {
-    const r = parse("x is 42 named high from high as i32, low as i32");
+    const r = mustParse("x is 42 named high from high as i32, low as i32");
     const result = match(r.x, {
       high: (v) => `High: ${String(v)}`,
       low: (v) => `Low: ${String(v)}`,
@@ -232,7 +238,7 @@ describe("match", () => {
   });
 
   it("matches enum by variant", () => {
-    const r = parse("x is red from red, green, blue");
+    const r = mustParse("x is red from red, green, blue");
     const result = match(r.x, {
       red: () => "#ff0000",
       green: () => "#00ff00",
@@ -242,7 +248,7 @@ describe("match", () => {
   });
 
   it("uses default handler (_) when no match", () => {
-    const r = parse("x is red from red, green, blue");
+    const r = mustParse("x is red from red, green, blue");
     const result = match(r.x, {
       green: () => "green",
       _: (v) => `other: ${String(v)}`,
@@ -251,7 +257,7 @@ describe("match", () => {
   });
 
   it("throws when no match and no default", () => {
-    const r = parse("x is red from red, green, blue");
+    const r = mustParse("x is red from red, green, blue");
     expect(() => match(r.x, {
       green: () => "green",
     })).toThrow("No match for variant 'red'");
@@ -334,7 +340,7 @@ describe("toJSON", () => {
   });
 
   it("result is JSON.stringify safe", () => {
-    const r = parse('x is 42\ny is inf\nz is "hello"\nlist is [1, 2]');
+    const r = mustParse('x is 42\ny is inf\nz is "hello"\nlist is [1, 2]');
     const json = {} as Record<string, any>;
     for (const [k, v] of Object.entries(r)) json[k] = toJSON(v);
     expect(() => JSON.stringify(json)).not.toThrow();
@@ -376,16 +382,16 @@ describe("fromJSON", () => {
 
 describe("merge", () => {
   it("merges two structs", () => {
-    const base = parse('host is "localhost"\nport is 8080');
-    const over = parse('port is 3000');
+    const base = mustParse('host is "localhost"\nport is 8080');
+    const over = mustParse('port is 3000');
     const result = merge(base, over);
     expect(result.host).toBe("localhost");
     expect(result.port).toBe(3000n);
   });
 
   it("deep merges nested structs", () => {
-    const base = parse('db is { host is "localhost", port is 5432 }\napp is "myapp"');
-    const over = parse('db is { port is 3306 }');
+    const base = mustParse('db is { host is "localhost", port is 5432 }\napp is "myapp"');
+    const over = mustParse('db is { port is 3306 }');
     const result = merge(base, over);
     const db = result.db as Record<string, UzonValue>;
     expect(db.host).toBe("localhost");
@@ -394,23 +400,23 @@ describe("merge", () => {
   });
 
   it("override adds new fields", () => {
-    const base = parse('a is 1');
-    const over = parse('b is 2');
+    const base = mustParse('a is 1');
+    const over = mustParse('b is 2');
     const result = merge(base, over);
     expect(result.a).toBe(1n);
     expect(result.b).toBe(2n);
   });
 
   it("non-struct values are replaced entirely", () => {
-    const base = parse('x is [1, 2, 3]');
-    const over = parse('x is [4, 5]');
+    const base = mustParse('x is [1, 2, 3]');
+    const over = mustParse('x is [4, 5]');
     const result = merge(base, over);
     expect((result.x as UzonValue[]).length).toBe(2);
   });
 
   it("does not mutate inputs", () => {
-    const base = parse('a is 1\nb is 2');
-    const over = parse('b is 3\nc is 4');
+    const base = mustParse('a is 1\nb is 2');
+    const over = mustParse('b is 3\nc is 4');
     const baseCopy = { ...base };
     merge(base, over);
     expect(base.a).toBe(baseCopy.a);

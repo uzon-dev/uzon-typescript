@@ -2,13 +2,22 @@
 // SPDX-License-Identifier: MIT
 import { describe, it, expect } from "vitest";
 import { parse } from "../src/index.js";
+import type { ParseOptions } from "../src/index.js";
 import { stringify } from "../src/stringify.js";
+import type { UzonValue } from "../src/value.js";
 import { UzonEnum, UzonTaggedUnion, UzonTuple } from "../src/value.js";
 
+/** Unwrap a ParseResult, throwing if there are errors. */
+function mustParse(src: string, opts?: ParseOptions): Record<string, UzonValue> {
+  const r = parse(src, opts);
+  if (r.errors) throw r.errors[0];
+  return r.value;
+}
+
 function roundtrip(src: string): Record<string, any> {
-  const first = parse(src);
+  const first = mustParse(src);
   const text = stringify(first);
-  return parse(text);
+  return mustParse(text);
 }
 
 describe("integration: parse → stringify → parse", () => {
@@ -72,13 +81,25 @@ describe("integration: parse → stringify → parse", () => {
 
 describe("integration: parse convenience function", () => {
   it("parses simple document", () => {
-    const result = parse('name is "uzon"\nversion is 1');
+    const result = mustParse('name is "uzon"\nversion is 1');
     expect(result.name).toBe("uzon");
     expect(result.version).toBe(1n);
   });
 
   it("supports env option", () => {
-    const result = parse("port is env.PORT", { env: { PORT: "3000" } });
+    const result = mustParse("port is env.PORT", { env: { PORT: "3000" } });
     expect(result.port).toBe("3000");
+  });
+
+  it("returns multiple errors for multiple cycles", () => {
+    const result = parse("a is b\nb is a\nc is d\nd is c");
+    expect(result.errors).toBeDefined();
+    expect(result.errors!.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("returns single error for syntax error", () => {
+    const result = parse("x is 1 +");
+    expect(result.errors).toBeDefined();
+    expect(result.errors!.length).toBe(1);
   });
 });

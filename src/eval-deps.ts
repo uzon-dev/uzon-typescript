@@ -8,7 +8,12 @@
  */
 
 import type { AstNode, BindingNode } from "./ast.js";
-import { UzonCircularError } from "./error.js";
+
+/** Result of topological sort: non-cycle bindings in order, plus cycle participant names. */
+export interface TopoResult {
+  order: string[];
+  cycleNames: string[];
+}
 
 /** Collect the set of referenced binding names from an AST node. */
 export function collectDeps(node: AstNode, scopeNames: Set<string>): Set<string> {
@@ -113,33 +118,215 @@ function walkDeps(node: AstNode, deps: Set<string>, scopeNames: Set<string>): vo
   }
 }
 
-/** Topological sort of binding dependency graph. Throws on cycles. */
-export function topoSort(deps: Map<string, Set<string>>, bindings: BindingNode[]): string[] {
-  const result: string[] = [];
-  const visited = new Set<string>();
-  const inStack = new Set<string>();
+/** A function call edge: caller → callee with the call site location. */
+interface CallEdge {
+  callee: string;
+  line: number;
+  col: number;
+}
 
-  const visit = (name: string) => {
-    if (visited.has(name)) return;
-    if (inStack.has(name)) {
-      const b = bindings.find(b => b.name === name);
-      throw new UzonCircularError(
-        `Circular dependency detected involving '${name}'`,
-        b?.line, b?.col,
-      );
+/** Info about a function participating in a call cycle, with the call site that closes the cycle. */
+export interface FnCycleEntry {
+  name: string;
+  line: number;
+  col: number;
+}
+
+/** Walk a function body to find direct calls to known function bindings. */
+function collectFunctionCalls(node: AstNode, funcNames: Set<string>): CallEdge[] {
+  const edges: CallEdge[] = [];
+  walkCalls(node, funcNames, edges);
+  return edges;
+}
+
+function walkCalls(node: AstNode, funcNames: Set<string>, edges: CallEdge[]): void {
+  if (node.kind === "FunctionCall" && node.callee.kind === "Identifier") {
+    if (funcNames.has(node.callee.name)) {
+      edges.push({ callee: node.callee.name, line: node.callee.line, col: node.callee.col });
     }
-    inStack.add(name);
-    const d = deps.get(name);
-    if (d) {
-      for (const dep of d) {
-        if (deps.has(dep)) visit(dep);
+  }
+  // Recurse into children (same traversal as walkDeps minus the dep collection)
+  switch (node.kind) {
+    case "FunctionCall":
+      walkCalls(node.callee, funcNames, edges);
+      for (const a of node.args) walkCalls(a, funcNames, edges);
+      break;
+    case "FunctionExpr":
+      for (const p of node.params) {
+        if (p.defaultValue) walkCalls(p.defaultValue, funcNames, edges);
+      }
+      for (const b of node.body) walkCalls(b.value, funcNames, edges);
+      walkCalls(node.finalExpr, funcNames, edges);
+      break;
+    case "BinaryOp":
+      walkCalls(node.left, funcNames, edges);
+      walkCalls(node.right, funcNames, edges);
+      break;
+    case "UnaryOp":
+      walkCalls(node.operand, funcNames, edges);
+      break;
+    case "IfExpr":
+      walkCalls(node.condition, funcNames, edges);
+      walkCalls(node.thenBranch, funcNames, edges);
+      walkCalls(node.elseBranch, funcNames, edges);
+      break;
+    case "CaseExpr":
+      walkCalls(node.scrutinee, funcNames, edges);
+      for (const wc of node.whenClauses) {
+        if (typeof wc.value !== "string") walkCalls(wc.value, funcNames, edges);
+        walkCalls(wc.result, funcNames, edges);
+      }
+      walkCalls(node.elseBranch, funcNames, edges);
+      break;
+    case "OrElse":
+      walkCalls(node.left, funcNames, edges);
+      walkCalls(node.right, funcNames, edges);
+      break;
+    case "MemberAccess":
+      walkCalls(node.object, funcNames, edges);
+      break;
+    case "TypeAnnotation":
+      walkCalls(node.expr, funcNames, edges);
+      break;
+    case "Conversion":
+      walkCalls(node.expr, funcNames, edges);
+      break;
+    case "Grouping":
+      walkCalls(node.expr, funcNames, edges);
+      break;
+    case "StructOverride":
+      walkCalls(node.base, funcNames, edges);
+      for (const f of node.overrides.fields) walkCalls(f.value, funcNames, edges);
+      break;
+    case "StructPlus":
+      walkCalls(node.base, funcNames, edges);
+      for (const f of node.extensions.fields) walkCalls(f.value, funcNames, edges);
+      break;
+    case "FromEnum": walkCalls(node.value, funcNames, edges); break;
+    case "FromUnion": walkCalls(node.value, funcNames, edges); break;
+    case "NamedVariant": walkCalls(node.value, funcNames, edges); break;
+    case "FieldExtraction": walkCalls(node.source, funcNames, edges); break;
+    case "StructLiteral":
+      for (const f of node.fields) walkCalls(f.value, funcNames, edges);
+      break;
+    case "ListLiteral":
+      for (const e of node.elements) walkCalls(e, funcNames, edges);
+      break;
+    case "TupleLiteral":
+      for (const e of node.elements) walkCalls(e, funcNames, edges);
+      break;
+    case "StringLiteral":
+      for (const p of node.parts) {
+        if (typeof p !== "string") walkCalls(p, funcNames, edges);
+      }
+      break;
+  }
+}
+
+/**
+ * Check that the function call graph is a DAG (§3.8).
+ * Returns cycle participants with the call site location that creates the cycle.
+ */
+export function checkFunctionCallDag(bindings: BindingNode[]): FnCycleEntry[] {
+  // Identify function bindings
+  const funcNames = new Set<string>();
+  for (const b of bindings) {
+    if (b.value.kind === "FunctionExpr") funcNames.add(b.name);
+  }
+  if (funcNames.size === 0) return [];
+
+  // Build call graph with location info
+  const graph = new Map<string, CallEdge[]>();
+  for (const b of bindings) {
+    if (!funcNames.has(b.name)) continue;
+    graph.set(b.name, collectFunctionCalls(b.value, funcNames));
+  }
+
+  // DFS cycle detection (3-color: 0=white, 1=gray, 2=black)
+  const color = new Map<string, number>();
+  const results: FnCycleEntry[] = [];
+  const reported = new Set<string>();
+
+  function dfs(name: string): boolean {
+    color.set(name, 1); // gray
+    for (const edge of graph.get(name) ?? []) {
+      const c = color.get(edge.callee) ?? 0;
+      if (c === 1) {
+        // Back-edge → cycle. Collect all gray nodes as participants.
+        for (const [n, nc] of color) {
+          if (nc === 1 && !reported.has(n)) {
+            // Find the call edge FROM this node to another gray node (call site)
+            const callEdge = (graph.get(n) ?? []).find(
+              e => (color.get(e.callee) ?? 0) === 1,
+            );
+            if (callEdge) {
+              results.push({ name: n, line: callEdge.line, col: callEdge.col });
+            }
+            reported.add(n);
+          }
+        }
+        return true;
+      }
+      if (c === 0 && dfs(edge.callee)) return true;
+    }
+    color.set(name, 2); // black
+    return false;
+  }
+
+  for (const name of funcNames) {
+    if ((color.get(name) ?? 0) === 0) dfs(name);
+  }
+  return results;
+}
+
+/**
+ * Topological sort via Kahn's algorithm.
+ * Returns the partial evaluation order (non-cycle bindings) and names of cycle participants.
+ */
+export function topoSort(deps: Map<string, Set<string>>, bindings: BindingNode[]): TopoResult {
+  const allNames = new Set(bindings.map(b => b.name));
+
+  // in-degree = number of dependencies within the binding set
+  const inDegree = new Map<string, number>();
+  // reverse adjacency: name → who depends on name
+  const rdeps = new Map<string, string[]>();
+
+  for (const name of allNames) {
+    rdeps.set(name, []);
+  }
+  for (const [name, depSet] of deps) {
+    let count = 0;
+    for (const dep of depSet) {
+      if (allNames.has(dep)) {
+        count++;
+        rdeps.get(dep)!.push(name);
       }
     }
-    inStack.delete(name);
-    visited.add(name);
-    result.push(name);
-  };
+    inDegree.set(name, count);
+  }
 
-  for (const b of bindings) visit(b.name);
-  return result;
+  // Kahn's: start with nodes that have no dependencies
+  const queue: string[] = [];
+  for (const name of allNames) {
+    if ((inDegree.get(name) ?? 0) === 0) queue.push(name);
+  }
+
+  const order: string[] = [];
+  while (queue.length > 0) {
+    const name = queue.shift()!;
+    order.push(name);
+    for (const dependent of rdeps.get(name)!) {
+      const deg = inDegree.get(dependent)! - 1;
+      inDegree.set(dependent, deg);
+      if (deg === 0) queue.push(dependent);
+    }
+  }
+
+  // Bindings not in order are cycle participants (in_degree > 0)
+  const orderSet = new Set(order);
+  const cycleNames = bindings
+    .filter(b => !orderSet.has(b.name))
+    .map(b => b.name);
+
+  return { order, cycleNames };
 }

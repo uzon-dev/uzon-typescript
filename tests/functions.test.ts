@@ -810,8 +810,9 @@ describe("from union in struct with binding termination (§9)", () => {
 });
 
 describe("Multiline string comment detection (§4.4.2)", () => {
-  it("rejects comment between multiline string parts", () => {
-    expect(() => evaluate(`result is "hello" // comment\n"world"`)).toThrow(/comment.*multiline/i);
+  it("allows trailing comment on multiline string part", () => {
+    const r = evaluate(`result is "hello" // comment\n"world"`);
+    expect(r.result).toBe("hello\nworld");
   });
 
   it("allows multiline string without comment", () => {

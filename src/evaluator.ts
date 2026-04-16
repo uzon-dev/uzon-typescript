@@ -34,7 +34,7 @@ import { Parser } from "./parser.js";
 
 // ── Extracted modules ──
 import type { EvalContext } from "./eval-context.js";
-import { collectDeps, topoSort } from "./eval-deps.js";
+import { collectDeps, topoSort, checkFunctionCallDag } from "./eval-deps.js";
 import {
   validateIntegerType, validateFloatType,
   actualType, isAdoptable,
@@ -64,6 +64,8 @@ export interface EvalOptions {
   env?: Record<string, string>;
   filename?: string;
   fileReader?: (path: string) => string;
+  /** Resolve a path to its canonical form (e.g. resolving symlinks). */
+  realpath?: (path: string) => string;
   importCache?: Map<string, Record<string, UzonValue>>;
   scopeCache?: Map<string, Scope>;
   importStack?: string[];
@@ -81,9 +83,12 @@ export class Evaluator implements EvalContext {
   private env: Record<string, string>;
   private filename: string | null;
   private fileReader: ((path: string) => string) | null;
+  private realpathFn: ((path: string) => string) | null;
   private importCache: Map<string, Record<string, UzonValue>>;
   private scopeCache: Map<string, Scope>;
   private importStack: string[];
+  /** Collected errors for multi-error reporting (circular deps, import cycles). */
+  collectedErrors: UzonError[] = [];
   structScopes!: WeakMap<Record<string, UzonValue>, Scope>;
   structTypeNames!: WeakMap<Record<string, UzonValue>, string>;
   listElementTypes!: WeakMap<UzonValue[], string>;
@@ -104,6 +109,7 @@ export class Evaluator implements EvalContext {
     this.env = options.env ?? ((globalThis as any).process?.env as Record<string, string> ?? {});
     this.filename = options.filename ?? null;
     this.fileReader = options.fileReader ?? null;
+    this.realpathFn = options.realpath ?? null;
     this.importCache = options.importCache ?? new Map();
     this.scopeCache = options.scopeCache ?? new Map();
     this.importStack = options.importStack ?? [];
@@ -145,20 +151,13 @@ export class Evaluator implements EvalContext {
     bindings: BindingNode[], scope: Scope, allowOverloads = false,
     locals?: Map<string, UzonValue>,
   ): void {
-    const { bindingMap, order } = this.resolveBindingOrder(bindings, allowOverloads);
-    this.validateBindings(bindings);
-    this.evaluateInOrder(order, bindingMap, scope, locals);
-  }
-
-  /** Step 1+2: Build dependency graph + topological sort. */
-  private resolveBindingOrder(
-    bindings: BindingNode[], allowOverloads: boolean,
-  ): { bindingMap: Map<string, BindingNode>; order: string[] } {
     const deps = new Map<string, Set<string>>();
     const bindingMap = new Map<string, BindingNode>();
     const names = new Set<string>();
     const hasPriorBinding = new Set<string>();
+    const fnCycleNames = new Set<string>();
 
+    // Step 1: Build name set and detect duplicates
     for (const b of bindings) {
       if (names.has(b.name)) {
         if (!allowOverloads
@@ -171,25 +170,44 @@ export class Evaluator implements EvalContext {
       bindingMap.set(b.name, b);
     }
 
+    // Step 2: Collect dependencies
     for (const b of bindings) {
       const d = collectDeps(b.value, names);
-      if (d.has(b.name) && b.value.kind === "FunctionExpr" && !hasPriorBinding.has(b.name)) {
-        throw new UzonCircularError(
-          `Direct recursion detected: '${b.name}' references itself — the call graph must be a DAG`,
-          b.line, b.col,
-        );
-      }
       d.delete(b.name);
       deps.set(b.name, d);
     }
 
-    return { bindingMap, order: topoSort(deps, bindings) };
-  }
+    // Step 2b: Check function call DAG — detect direct & mutual recursion with call site locations
+    const fnCycles = checkFunctionCallDag(bindings);
+    for (const entry of fnCycles) {
+      this.collectedErrors.push(new UzonCircularError(
+        `Recursion detected: '${entry.name}' participates in a call cycle — the call graph must be a DAG`,
+        entry.line, entry.col,
+      ));
+      fnCycleNames.add(entry.name);
+    }
 
-  /** Step 3: Pre-evaluation validation of bindings. */
-  private validateBindings(bindings: BindingNode[]): void {
-    for (const b of bindings) {
-      // §3.1: literal `undefined` cannot appear on the RHS of `is` in a binding.
+    // Step 3: Topological sort — collect ALL cycle participants
+    const { order, cycleNames } = topoSort(deps, bindings);
+    for (const name of cycleNames) {
+      if (!fnCycleNames.has(name)) {
+        const b = bindings.find(b => b.name === name)!;
+        this.collectedErrors.push(new UzonCircularError(
+          `Circular dependency detected involving '${name}'`,
+          b.line, b.col,
+        ));
+      }
+    }
+
+    // Step 4: Evaluate non-cycle bindings via partial topological order.
+    // Catching circular errors from imports so other bindings can still be evaluated.
+    const preCount = this.collectedErrors.length;
+    let hadNestedCircular = false;
+    for (const name of order) {
+      if (fnCycleNames.has(name)) continue;
+      const b = bindingMap.get(name)!;
+
+      // Inline validation
       if (b.value.kind === "UndefinedLiteral") {
         throw new UzonTypeError(
           `Cannot assign literal 'undefined' to '${b.name}' — undefined is a state, not a value`,
@@ -212,32 +230,36 @@ export class Evaluator implements EvalContext {
           );
         }
       }
+      if (b.value.kind === "EnvRef") {
+        throw new UzonTypeError(
+          "standalone env is not a value; use env.VARIABLE_NAME",
+          b.value.line, b.value.col,
+        );
+      }
+
+      try {
+        let val = this.evalNode(b.value, scope, name);
+        if (b.calledName) val = this.applyCalledName(val, b.calledName);
+        scope.set(name, val);
+        if (locals && val !== UZON_UNDEFINED) locals.set(name, val);
+        this.storeNumericType(val, b, scope);
+        if (b.calledName) this.registerType(b.calledName, b.value, val, scope);
+        this.registerStructScope(val, name, scope);
+      } catch (e) {
+        if (e instanceof UzonCircularError) {
+          if (this.collectedErrors.length === preCount) {
+            this.collectedErrors.push(e);
+          }
+          hadNestedCircular = true;
+          continue;
+        }
+        throw e;
+      }
     }
-  }
 
-  /** Step 4: Evaluate bindings in dependency order. */
-  private evaluateInOrder(
-    order: string[], bindingMap: Map<string, BindingNode>,
-    scope: Scope, locals?: Map<string, UzonValue>,
-  ): void {
-    for (const name of order) {
-      const b = bindingMap.get(name)!;
-      let val = this.evalNode(b.value, scope, name);
-
-      if (b.calledName) {
-        val = this.applyCalledName(val, b.calledName);
-      }
-
-      scope.set(name, val);
-      if (locals && val !== UZON_UNDEFINED) locals.set(name, val);
-
-      this.storeNumericType(val, b, scope);
-
-      if (b.calledName) {
-        this.registerType(b.calledName, b.value, val, scope);
-      }
-
-      this.registerStructScope(val, name, scope);
+    // If any cycle errors were found, throw to signal failure
+    if (cycleNames.length > 0 || fnCycleNames.size > 0 || hadNestedCircular) {
+      throw this.collectedErrors[this.collectedErrors.length - 1];
     }
   }
 
@@ -803,9 +825,18 @@ export class Evaluator implements EvalContext {
     }
     const lastSeg = resolvedPath.split("/").pop()!;
     if (!lastSeg.includes(".")) resolvedPath += ".uzon";
+
+    // Normalize: logical normalization first, then realpath for symlink resolution
     resolvedPath = this.normalizePath(resolvedPath);
+    if (this.realpathFn) {
+      try { resolvedPath = this.realpathFn(resolvedPath); } catch { /* keep normalized */ }
+    }
 
     if (this.importCache.has(resolvedPath)) {
+      // Restore cached scope for type information
+      if (this.scopeCache.has(resolvedPath)) {
+        // Type info already available via scopeCache
+      }
       return this.importCache.get(resolvedPath)! as unknown as UzonValue;
     }
     if (this.importStack.includes(resolvedPath)) {
@@ -837,6 +868,9 @@ export class Evaluator implements EvalContext {
       this.importCache.set(resolvedPath, result);
       return result as unknown as UzonValue;
     } catch (e) {
+      // Don't propagate the imported file's internal collected errors —
+      // they belong to that file, not the importer.
+      // Only propagate a single import-level error.
       if (e instanceof UzonError) {
         if (!e.filename) e.withFilename(resolvedPath);
         e.addImportFrame(this.filename ?? "<string>", node.line, node.col);

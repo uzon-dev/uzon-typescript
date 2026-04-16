@@ -6,7 +6,13 @@ import {
   UzonEnum, UzonUnion, UzonTaggedUnion, UzonTuple, UzonFunction,
   UZON_UNDEFINED,
 } from "../src/index.js";
-import type { UzonValue } from "../src/index.js";
+import type { ParseOptions, UzonValue } from "../src/index.js";
+
+function mustParse(src: string, opts?: ParseOptions): Record<string, UzonValue> {
+  const r = parse(src, opts);
+  if (r.errors) throw r.errors[0];
+  return r.value;
+}
 
 describe("stringifyValue", () => {
   // ── Primitives ────────────────────────────────────────────────
@@ -308,9 +314,9 @@ describe("toJS", () => {
 
 describe("roundtrip (parse → stringify → parse)", () => {
   function roundtrip(src: string) {
-    const result = parse(src);
+    const result = mustParse(src);
     const text = stringify(result);
-    return parse(text, { native: true });
+    return mustParse(text, { native: true });
   }
 
   it("primitives", () => {
@@ -363,17 +369,17 @@ describe("roundtrip (parse → stringify → parse)", () => {
 
 describe("parse", () => {
   it("returns UzonValue by default", () => {
-    const r = parse("x is 42");
+    const r = mustParse("x is 42");
     expect(r.x).toBe(42n);
   });
 
   it("returns plain JS with native: true", () => {
-    const r = parse("x is 42", { native: true });
+    const r = mustParse("x is 42", { native: true });
     expect(r.x).toBe(42);
   });
 
   it("passes env to evaluator", () => {
-    const r = parse("x is env.MY_VAR", { env: { MY_VAR: "hello" }, native: true });
+    const r = mustParse("x is env.MY_VAR", { env: { MY_VAR: "hello" }, native: true });
     expect(r.x).toBe("hello");
   });
 });

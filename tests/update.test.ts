@@ -12,24 +12,30 @@ import {
 } from "../src/index.js";
 import type { UzonValue } from "../src/index.js";
 
+function mustParse(src: string): Record<string, UzonValue> {
+  const r = parse(src);
+  if (r.errors) throw r.errors[0];
+  return r.value;
+}
+
 // ── Struct updates ──────────────────────────────────────────────
 
 describe("withField", () => {
   it("adds a new field", () => {
-    const s = parse('a is 1');
+    const s = mustParse('a is 1');
     const s2 = withField(s, "b", 2n);
     expect(s2.a).toBe(1n);
     expect(s2.b).toBe(2n);
   });
 
   it("replaces an existing field", () => {
-    const s = parse('a is 1');
+    const s = mustParse('a is 1');
     const s2 = withField(s, "a", 99n);
     expect(s2.a).toBe(99n);
   });
 
   it("does not mutate the original", () => {
-    const s = parse('a is 1');
+    const s = mustParse('a is 1');
     withField(s, "b", 2n);
     expect(s.b).toBeUndefined();
   });
@@ -37,20 +43,20 @@ describe("withField", () => {
 
 describe("withoutField", () => {
   it("removes a field", () => {
-    const s = parse('a is 1\nb is 2');
+    const s = mustParse('a is 1\nb is 2');
     const s2 = withoutField(s, "b");
     expect(s2.a).toBe(1n);
     expect(s2.b).toBeUndefined();
   });
 
   it("does not mutate the original", () => {
-    const s = parse('a is 1\nb is 2');
+    const s = mustParse('a is 1\nb is 2');
     withoutField(s, "b");
     expect(s.b).toBe(2n);
   });
 
   it("no-op for missing field", () => {
-    const s = parse('a is 1');
+    const s = mustParse('a is 1');
     const s2 = withoutField(s, "missing");
     expect(s2.a).toBe(1n);
   });

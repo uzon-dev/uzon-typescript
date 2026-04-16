@@ -5,6 +5,8 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parseFile, stringifyFile, watch } from "../src/index.js";
+import type { ParseResult } from "../src/index.js";
+import type { UzonValue } from "../src/value.js";
 
 // ── Temp dir helpers ────────────────────────────────────────────
 
@@ -14,6 +16,13 @@ function makeTempDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "uzon-test-"));
   tempDirs.push(dir);
   return dir;
+}
+
+/** Unwrap ParseResult, throwing if there are errors. */
+function mustParseFile(path: string, opts?: Parameters<typeof parseFile>[1]): Record<string, UzonValue> {
+  const r = parseFile(path, opts) as ParseResult;
+  if (r.errors) throw r.errors[0];
+  return r.value;
 }
 
 afterEach(() => {
@@ -31,7 +40,7 @@ describe("parseFile", () => {
     const file = join(dir, "test.uzon");
     writeFileSync(file, 'host is "localhost"\nport is 8080\n');
 
-    const result = parseFile(file);
+    const result = mustParseFile(file);
     expect(result.host).toBe("localhost");
     expect(result.port).toBe(8080n);
   });
@@ -41,7 +50,7 @@ describe("parseFile", () => {
     const file = join(dir, "config.uzon");
     writeFileSync(file, 'x is 42\n');
 
-    const result = parseFile(file);
+    const result = mustParseFile(file);
     expect(result.x).toBe(42n);
   });
 
@@ -50,7 +59,7 @@ describe("parseFile", () => {
     const file = join(dir, "native.uzon");
     writeFileSync(file, 'x is 42\ny is 3.14\n');
 
-    const result = parseFile(file, { native: true });
+    const result = mustParseFile(file, { native: true });
     expect(result.x).toBe(42);
     expect(typeof result.x).toBe("number");
     expect(result.y).toBe(3.14);
@@ -61,20 +70,22 @@ describe("parseFile", () => {
     const file = join(dir, "bigint.uzon");
     writeFileSync(file, 'x is 42\n');
 
-    const result = parseFile(file, { native: true, bigint: "string" });
+    const result = mustParseFile(file, { native: true, bigint: "string" });
     expect(result.x).toBe("42");
   });
 
-  it("throws on missing file", () => {
-    expect(() => parseFile("/nonexistent/path/file.uzon")).toThrow();
+  it("returns error on missing file", () => {
+    const result = parseFile("/nonexistent/path/file.uzon");
+    expect(result.errors).toBeDefined();
   });
 
-  it("throws on syntax error", () => {
+  it("returns error on syntax error", () => {
     const dir = makeTempDir();
     const file = join(dir, "bad.uzon");
     writeFileSync(file, 'x is is is\n');
 
-    expect(() => parseFile(file)).toThrow();
+    const result = parseFile(file);
+    expect(result.errors).toBeDefined();
   });
 
   it("resolves struct imports relative to file", () => {
@@ -84,7 +95,7 @@ describe("parseFile", () => {
     writeFileSync(baseFile, 'x is 1\ny is 2\n');
     writeFileSync(mainFile, 'config is struct "base.uzon"\n');
 
-    const result = parseFile(mainFile);
+    const result = mustParseFile(mainFile);
     const config = result.config as Record<string, any>;
     expect(config.x).toBe(1n);
     expect(config.y).toBe(2n);
@@ -95,7 +106,7 @@ describe("parseFile", () => {
     const file = join(dir, "env.uzon");
     writeFileSync(file, 'port is env.PORT\n');
 
-    const result = parseFile(file, { env: { PORT: "3000" } });
+    const result = mustParseFile(file, { env: { PORT: "3000" } });
     expect(result.port).toBe("3000");
   });
 });
@@ -122,7 +133,7 @@ describe("stringifyFile", () => {
     const original = { name: "test", count: 42n, rate: 3.14 };
 
     stringifyFile(file, original);
-    const result = parseFile(file);
+    const result = mustParseFile(file);
 
     expect(result.name).toBe("test");
     expect(result.count).toBe(42n);

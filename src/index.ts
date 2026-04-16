@@ -8,7 +8,7 @@
  * See the UZON specification (v0.6) for the full language definition.
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Lexer } from "./lexer.js";
 import { Parser } from "./parser.js";
@@ -104,76 +104,99 @@ export interface ParseOptions {
   bigint?: "number" | "bigint" | "string";
 }
 
+/** Parse result: either a value or one or more detailed errors. */
+export type ParseResult =
+  | { value: Record<string, UzonValue>; errors?: never }
+  | { value?: never; errors: UzonError[] };
+
+/** Wrap a single error in a ParseResult. */
+function singleError(e: UzonError): ParseResult {
+  return { errors: [e] };
+}
+
+/** Safe realpathSync wrapper — falls back to input on failure. */
+function safeRealpath(p: string): string {
+  try { return realpathSync(p); } catch { return p; }
+}
+
 /**
- * Parse UZON source text and return evaluated bindings.
+ * Parse UZON source text and return a ParseResult.
  *
- * By default, returns UzonValue types (bigint for integers, UzonEnum, etc.).
- * Pass `{ native: true }` to get plain JS types instead.
+ * Returns `{ value }` on success or `{ errors }` on failure.
+ * Multiple errors are returned when there are multiple circular dependencies.
  *
  * ```ts
- * parse('x is 42')                    // { x: 42n }
- * parse('x is 42', { native: true })  // { x: 42 }
+ * const result = parse('x is 42');
+ * if ('errors' in result) console.error(result.errors);
+ * else console.log(result.value); // { x: 42n }
  * ```
  */
 export function parse(
   source: string,
-  options?: ParseOptions & { native: true },
-): Record<string, any>;
-export function parse(
-  source: string,
-  options?: ParseOptions,
-): Record<string, UzonValue>;
-export function parse(
-  source: string,
   options: ParseOptions = {},
-): Record<string, UzonValue> | Record<string, any> {
+): ParseResult {
+  const filename = options.filename ? safeRealpath(resolve(options.filename)) : undefined;
   const evalOpts = {
     ...options,
+    filename,
     fileReader: options.fileReader ?? ((p: string) => readFileSync(p, "utf-8")),
+    realpath: safeRealpath,
+    importStack: filename ? [filename] : [] as string[],
   };
-  if (evalOpts.filename) {
-    evalOpts.filename = resolve(evalOpts.filename);
-  }
+
+  const evaluator = new Evaluator(evalOpts);
   try {
     const tokens = new Lexer(source).tokenize();
     const doc = new Parser(tokens).parse();
-    const result = new Evaluator(evalOpts).evaluate(doc);
+    const result = evaluator.evaluate(doc);
     if (options.native) {
       const jsResult: Record<string, any> = {};
       for (const [k, v] of Object.entries(result)) {
         jsResult[k] = toJS(v, { bigint: options.bigint });
       }
-      return jsResult;
+      return { value: jsResult };
     }
-    return result;
+    return { value: result };
   } catch (e) {
-    if (e instanceof UzonError && evalOpts.filename && !e.filename) {
-      e.withFilename(evalOpts.filename);
+    // Multi-error: if the evaluator collected multiple errors, return them all
+    if (evaluator.collectedErrors.length > 0) {
+      for (const err of evaluator.collectedErrors) {
+        if (filename && !err.filename) err.withFilename(filename);
+      }
+      return { errors: evaluator.collectedErrors };
     }
-    throw e;
+    if (e instanceof UzonError) {
+      if (filename && !e.filename) e.withFilename(filename);
+      return singleError(e);
+    }
+    throw e; // non-Uzon errors (e.g. OOM) propagate
   }
 }
 
 /**
- * Parse a UZON file from disk and return evaluated bindings.
+ * Parse a UZON file from disk and return a ParseResult.
  * Struct imports are resolved relative to the file's directory.
- * Pass `{ native: true }` to get plain JS types.
  */
 export function parseFile(
   filePath: string,
-  options?: ParseOptions & { native: true },
-): Record<string, any>;
-export function parseFile(
-  filePath: string,
-  options?: ParseOptions,
-): Record<string, UzonValue>;
-export function parseFile(
-  filePath: string,
   options: ParseOptions = {},
-): Record<string, UzonValue> | Record<string, any> {
-  const absPath = resolve(filePath);
-  const source = readFileSync(absPath, "utf-8");
-  return parse(source, { ...options, filename: absPath });
+): ParseResult {
+  // Normalize path via realpath for symlink consistency
+  const absPath = safeRealpath(resolve(filePath));
+  let source: string;
+  try {
+    source = readFileSync(absPath, "utf-8");
+  } catch {
+    return singleError(new UzonError("cannot open file", 0, 0));
+  }
+  const result = parse(source, { ...options, filename: absPath });
+  // Attach filename to errors if not already set
+  if (result.errors) {
+    for (const e of result.errors) {
+      if (!e.filename) e.withFilename(absPath);
+    }
+  }
+  return result;
 }
 
 /**

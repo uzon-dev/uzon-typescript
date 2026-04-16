@@ -47,24 +47,17 @@ function parseStringSingleOrInterpolated(ctx: ParseContext): StringPart[] {
 
 /**
  * §4.4.2: Check whether the next line continues a multiline string.
- * Requires exactly one newline between strings — blank lines or comments break the sequence.
+ * Requires exactly one newline between strings — blank lines break the sequence.
+ * A trailing comment on the same line as a string part is transparent.
  */
 function checkMultilineStringContinuation(ctx: ParseContext): boolean {
   if (ctx.suppressMultilineString) return false;
   let i = ctx.pos;
   if (i >= ctx.tokens.length) return false;
   if (ctx.tokens[i].type !== TokenType.Newline) return false;
-  const nlTok = ctx.tokens[i];
   i++;
-  // §4.4.2: comment between multiline string parts is an error
-  if (nlTok.afterComment) {
-    let j = i;
-    while (j < ctx.tokens.length && ctx.tokens[j].type === TokenType.Newline) j++;
-    if (j < ctx.tokens.length && ctx.tokens[j].type === TokenType.String) {
-      ctx.error("Comment between multiline string parts is not allowed", ctx.tokens[j]);
-    }
-    return false;
-  }
+  // A trailing comment (afterComment) does not break multiline continuation —
+  // it's just a line comment after the string part, not "between" parts.
   if (i < ctx.tokens.length && ctx.tokens[i].type === TokenType.String) return true;
   return false;
 }
