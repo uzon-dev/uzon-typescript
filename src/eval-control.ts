@@ -143,7 +143,7 @@ export function evalCase(
   for (const wc of node.whenClauses) {
     const wcNode = wc.value as AstNode;
     if (wcNode.kind === "UndefinedLiteral") {
-      throw new UzonRuntimeError(
+      throw new UzonTypeError(
         "'when undefined' is not allowed — use 'is undefined' check before 'case'",
         wc.line, wc.col,
       );

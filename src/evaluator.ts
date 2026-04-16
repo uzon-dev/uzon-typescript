@@ -191,7 +191,7 @@ export class Evaluator implements EvalContext {
     for (const b of bindings) {
       // §3.1: literal `undefined` cannot appear on the RHS of `is` in a binding.
       if (b.value.kind === "UndefinedLiteral") {
-        throw new UzonSyntaxError(
+        throw new UzonTypeError(
           `Cannot assign literal 'undefined' to '${b.name}' — undefined is a state, not a value`,
           b.value.line, b.value.col,
         );
@@ -322,7 +322,7 @@ export class Evaluator implements EvalContext {
       case "Identifier": return this.resolveIdentifier(node.name, node, scope, exclude);
 
       case "EnvRef":
-        throw new UzonSyntaxError("'env' must be followed by .NAME", node.line, node.col);
+        throw new UzonTypeError("'env' must be followed by .NAME", node.line, node.col);
 
       case "MemberAccess": return this.evalMemberAccess(node, scope, exclude);
       case "BinaryOp": return evalBinaryOp(this, node, scope, exclude);
