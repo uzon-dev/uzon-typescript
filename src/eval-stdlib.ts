@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: © 2026 Suho Kang
 // SPDX-License-Identifier: MIT
 /**
- * Standard library — 18 built-in functions (§5.16).
+ * Standard library — 24 built-in functions (§5.16).
  *
  * All std.* functions are dispatched through evalStdCall, which delegates
  * to individual implementations. Each function receives a EvalContext
@@ -27,7 +27,7 @@ export function evalStdCall(
 ): UzonValue {
   switch (fnName) {
     case "len": return stdLen(ctx, argNodes, scope, exclude, node);
-    case "has": return stdHas(ctx, argNodes, scope, exclude, node);
+    case "hasKey": return stdHasKey(ctx, argNodes, scope, exclude, node);
     case "get": return stdGet(ctx, argNodes, scope, exclude, node);
     case "keys": return stdKeys(ctx, argNodes, scope, exclude, node);
     case "values": return stdValues(ctx, argNodes, scope, exclude, node);
@@ -44,6 +44,12 @@ export function evalStdCall(
     case "trim": return stdTrim(ctx, argNodes, scope, exclude, node);
     case "lower": return stdLower(ctx, argNodes, scope, exclude, node);
     case "upper": return stdUpper(ctx, argNodes, scope, exclude, node);
+    case "reverse": return stdReverse(ctx, argNodes, scope, exclude, node);
+    case "all": return stdAll(ctx, argNodes, scope, exclude, node);
+    case "any": return stdAny(ctx, argNodes, scope, exclude, node);
+    case "contains": return stdContains(ctx, argNodes, scope, exclude, node);
+    case "startsWith": return stdStartsWith(ctx, argNodes, scope, exclude, node);
+    case "endsWith": return stdEndsWith(ctx, argNodes, scope, exclude, node);
     default:
       throw new UzonRuntimeError(`'std.${fnName}' is not a standard library function`, node.line, node.col);
   }
@@ -97,20 +103,13 @@ function stdLen(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: st
   throw new UzonTypeError("std.len requires a string, list, tuple, or struct", node.line, node.col);
 }
 
-function stdHas(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
-  expectArgs(argNodes, 2, "has", node);
-  const collection = unwrapUnion(evalArg(ctx, argNodes[0], scope, exclude, "has", node));
-  const key = evalArg(ctx, argNodes[1], scope, exclude, "has", node);
-  const keyNumType = ctx.numericType;
-  if (Array.isArray(collection)) {
-    const collectionNumType = ctx.listElementTypes.get(collection) ?? null;
-    return ctx.evalIn(key, collection, node, keyNumType, collectionNumType);
-  }
-  if (isStruct(collection)) {
-    if (typeof key !== "string") throw new UzonTypeError("std.has on a struct requires a string key", node.line, node.col);
-    return key in collection;
-  }
-  throw new UzonTypeError("std.has requires a list or struct", node.line, node.col);
+function stdHasKey(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
+  expectArgs(argNodes, 2, "hasKey", node);
+  const collection = unwrapUnion(evalArg(ctx, argNodes[0], scope, exclude, "hasKey", node));
+  const key = evalArg(ctx, argNodes[1], scope, exclude, "hasKey", node);
+  if (!isStruct(collection)) throw new UzonTypeError("std.hasKey requires a struct as the first argument", node.line, node.col);
+  if (typeof key !== "string") throw new UzonTypeError("std.hasKey requires a string key", node.line, node.col);
+  return key in collection;
 }
 
 function stdGet(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
@@ -316,4 +315,75 @@ function stdUpper(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: 
   const val = evalArg(ctx, argNodes[0], scope, exclude, "upper", node);
   if (typeof val !== "string") throw new UzonTypeError("std.upper requires a string argument", node.line, node.col);
   return val.toUpperCase();
+}
+
+// ── Reverse ──
+
+function stdReverse(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
+  expectArgs(argNodes, 1, "reverse", node);
+  const val = unwrapUnion(evalArg(ctx, argNodes[0], scope, exclude, "reverse", node));
+  if (typeof val === "string") return [...val].reverse().join("");
+  if (Array.isArray(val)) {
+    const result = [...val].reverse();
+    const elemType = ctx.listElementTypes.get(val);
+    if (elemType) ctx.listElementTypes.set(result, elemType);
+    return result;
+  }
+  throw new UzonTypeError("std.reverse requires a list or string", node.line, node.col);
+}
+
+// ── Collection predicates ──
+
+function stdAll(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
+  expectArgs(argNodes, 2, "all", node);
+  const list = unwrapUnion(evalArg(ctx, argNodes[0], scope, exclude, "all", node));
+  if (!Array.isArray(list)) throw new UzonTypeError("std.all requires a list as the first argument", node.line, node.col);
+  const fn = evalArg(ctx, argNodes[1], scope, exclude, "all", node);
+  if (!(fn instanceof UzonFunction)) throw new UzonTypeError("std.all requires a function as the second argument", node.line, node.col);
+  for (const elem of list) {
+    const result = ctx.callFunctionDirect(fn, [elem], scope, node);
+    if (typeof result !== "boolean") throw new UzonTypeError("std.all predicate must return bool", node.line, node.col);
+    if (!result) return false;
+  }
+  return true;
+}
+
+function stdAny(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
+  expectArgs(argNodes, 2, "any", node);
+  const list = unwrapUnion(evalArg(ctx, argNodes[0], scope, exclude, "any", node));
+  if (!Array.isArray(list)) throw new UzonTypeError("std.any requires a list as the first argument", node.line, node.col);
+  const fn = evalArg(ctx, argNodes[1], scope, exclude, "any", node);
+  if (!(fn instanceof UzonFunction)) throw new UzonTypeError("std.any requires a function as the second argument", node.line, node.col);
+  for (const elem of list) {
+    const result = ctx.callFunctionDirect(fn, [elem], scope, node);
+    if (typeof result !== "boolean") throw new UzonTypeError("std.any predicate must return bool", node.line, node.col);
+    if (result) return true;
+  }
+  return false;
+}
+
+// ── String predicates ──
+
+function stdContains(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
+  expectArgs(argNodes, 2, "contains", node);
+  const str = evalArg(ctx, argNodes[0], scope, exclude, "contains", node);
+  const sub = evalArg(ctx, argNodes[1], scope, exclude, "contains", node);
+  if (typeof str !== "string" || typeof sub !== "string") throw new UzonTypeError("std.contains requires two string arguments", node.line, node.col);
+  return str.includes(sub);
+}
+
+function stdStartsWith(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
+  expectArgs(argNodes, 2, "startsWith", node);
+  const str = evalArg(ctx, argNodes[0], scope, exclude, "startsWith", node);
+  const prefix = evalArg(ctx, argNodes[1], scope, exclude, "startsWith", node);
+  if (typeof str !== "string" || typeof prefix !== "string") throw new UzonTypeError("std.startsWith requires two string arguments", node.line, node.col);
+  return str.startsWith(prefix);
+}
+
+function stdEndsWith(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: string | undefined, node: AstNode): UzonValue {
+  expectArgs(argNodes, 2, "endsWith", node);
+  const str = evalArg(ctx, argNodes[0], scope, exclude, "endsWith", node);
+  const suffix = evalArg(ctx, argNodes[1], scope, exclude, "endsWith", node);
+  if (typeof str !== "string" || typeof suffix !== "string") throw new UzonTypeError("std.endsWith requires two string arguments", node.line, node.col);
+  return str.endsWith(suffix);
 }

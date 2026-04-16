@@ -279,24 +279,14 @@ describe("Standard Library (§5.16)", () => {
     });
   });
 
-  describe("std.has", () => {
-    it("list contains value", () => {
-      const r = evaluate(`result is std.has([1, 2, 3], 2)`);
-      expect(r.result).toBe(true);
-    });
-
-    it("list does not contain value", () => {
-      const r = evaluate(`result is std.has([1, 2, 3], 5)`);
-      expect(r.result).toBe(false);
-    });
-
+  describe("std.hasKey", () => {
     it("struct has field", () => {
-      const r = evaluate(`result is std.has({ name is "UZON" }, "name")`);
+      const r = evaluate(`result is std.hasKey({ name is "UZON" }, "name")`);
       expect(r.result).toBe(true);
     });
 
     it("struct missing field", () => {
-      const r = evaluate(`result is std.has({ name is "UZON" }, "port")`);
+      const r = evaluate(`result is std.hasKey({ name is "UZON" }, "port")`);
       expect(r.result).toBe(false);
     });
   });

@@ -731,8 +731,8 @@ describe("Evaluator", () => {
       expect(evalOne('x is std.len("hello")')).toBe(5n);
     });
 
-    it("std.has", () => {
-      const r = evaluate('s is { a is 1 }\nx is std.has(s, "a")');
+    it("std.hasKey", () => {
+      const r = evaluate('s is { a is 1 }\nx is std.hasKey(s, "a")');
       expect(r.x).toBe(true);
     });
 
