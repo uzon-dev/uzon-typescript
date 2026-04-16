@@ -524,13 +524,8 @@ export class Parser implements ParseContext {
         this.advance();
         variantDefs = this.parseTaggedUnionVariants();
       } else if (this.peek().type === TokenType.As) {
-        // §6.3: `named tag as TypeName` — reuse existing type definition
-        const asTok = this.advance();
-        const type = this.parseTypeExpr();
-        expr = {
-          kind: "TypeAnnotation", expr,
-          type, line: asTok.line, col: asTok.col,
-        } as AstNode;
+        // §6.3: `as Type` must precede `named variant` — reverse order is a syntax error
+        this.error("'as Type' must come before 'named variant' — write 'as Type named variant', not 'named variant as Type'", this.peek());
       }
 
       expr = { kind: "NamedVariant", value: expr, tag, variants: variantDefs, line: namedTok.line, col: namedTok.col };
@@ -787,9 +782,7 @@ export class Parser implements ParseContext {
   /** Parse a type expression and return its string name (for case type / when). */
   parseTypeExprAsString(): string {
     const typeNode = this.parseTypeExpr();
-    if (typeNode.isNull) return "null";
-    if (typeNode.isList && typeNode.inner) return `[${typeNode.inner.path.join(".")}]`;
-    return typeNode.path.join(".");
+    return typeExprNodeToString(typeNode);
   }
 
   parseTypeExpr(): TypeExprNode {
@@ -854,4 +847,13 @@ export class Parser implements ParseContext {
 
     return { kind: "TypeExpr", path, isList: false, inner: null, isNull: false, isTuple: false, tupleElements: null, line: first.line, col: first.col };
   }
+}
+
+function typeExprNodeToString(type: TypeExprNode): string {
+  if (type.isNull) return "null";
+  if (type.isList && type.inner) return `[${typeExprNodeToString(type.inner)}]`;
+  if (type.isTuple && type.tupleElements) {
+    return `(${type.tupleElements.map(t => typeExprNodeToString(t)).join(", ")})`;
+  }
+  return type.path.join(".");
 }

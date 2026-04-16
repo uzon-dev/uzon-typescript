@@ -10,7 +10,7 @@
 import type { AstNode, WhenClause } from "./ast.js";
 import { Scope } from "./scope.js";
 import {
-  UZON_UNDEFINED, UzonEnum, UzonUnion, UzonTaggedUnion,
+  UZON_UNDEFINED, UzonEnum, UzonUnion, UzonTaggedUnion, UzonTuple,
   type UzonValue,
 } from "./value.js";
 import { UzonRuntimeError, UzonTypeError } from "./error.js";
@@ -365,6 +365,15 @@ function valueMatchesTypeName(value: UzonValue, typeName: string): boolean {
   if (typeof value === "string") return typeName === "string";
   if (typeof value === "bigint") return /^[iu]\d+$/.test(typeName);
   if (typeof value === "number") return /^f\d+$/.test(typeName);
+  // §5.10: compound types in when clauses
+  if (Array.isArray(value) && typeName.startsWith("[") && typeName.endsWith("]")) {
+    const elemType = typeName.slice(1, -1);
+    if (value.length === 0) return true;
+    return value.some(el => el !== null && valueMatchesTypeName(el, elemType));
+  }
+  if (value instanceof UzonTuple && typeName.startsWith("(") && typeName.endsWith(")")) {
+    return true;
+  }
   return false;
 }
 

@@ -572,7 +572,7 @@ export class Evaluator implements EvalContext {
     if (val === UZON_UNDEFINED) {
       throw new UzonRuntimeError("Union value resolved to undefined", node.line, node.col);
     }
-    const typeNames = node.types.map(t => t.path.join("."));
+    const typeNames = node.types.map(t => typeExprToString(t));
     return new UzonUnion(val, typeNames);
   }
 
