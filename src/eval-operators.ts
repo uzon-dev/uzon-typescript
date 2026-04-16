@@ -145,14 +145,14 @@ function evalIsOperands(
   if (node.right.kind === "Identifier") {
     left = ctx.evalNode(node.left, scope, exclude);
     leftNumType = ctx.numericType;
-    if (left instanceof UzonUnion) left = left.value;
-    right = ctx.resolveEnumVariantOrEval(node.right, left, scope, exclude);
+    const leftInner = left instanceof UzonUnion ? left.value : left;
+    right = ctx.resolveEnumVariantOrEval(node.right, leftInner, scope, exclude);
     rightNumType = ctx.numericType;
   } else if (node.left.kind === "Identifier") {
     right = ctx.evalNode(node.right, scope, exclude);
     rightNumType = ctx.numericType;
-    if (right instanceof UzonUnion) right = right.value;
-    left = ctx.resolveEnumVariantOrEval(node.left, right, scope, exclude);
+    const rightInner = right instanceof UzonUnion ? right.value : right;
+    left = ctx.resolveEnumVariantOrEval(node.left, rightInner, scope, exclude);
     leftNumType = ctx.numericType;
   } else {
     left = ctx.evalNode(node.left, scope, exclude);
@@ -160,8 +160,35 @@ function evalIsOperands(
     right = ctx.evalNode(node.right, scope, exclude);
     rightNumType = ctx.numericType;
   }
-  if (left instanceof UzonUnion) left = left.value;
-  if (right instanceof UzonUnion) right = right.value;
+  // §3.6: Union type identity check before unwrapping
+  if (left instanceof UzonUnion && right instanceof UzonUnion) {
+    // Named unions: nominal identity
+    if (left.typeName || right.typeName) {
+      if (left.typeName !== right.typeName) {
+        throw new UzonTypeError(
+          `Cannot compare different union types: ${left.typeName ?? "anonymous"} vs ${right.typeName ?? "anonymous"}`,
+          node.line, node.col,
+        );
+      }
+    } else {
+      // Anonymous unions: structural identity (same member type set, order irrelevant)
+      const leftSet = new Set(left.types);
+      const rightSet = new Set(right.types);
+      if (leftSet.size !== rightSet.size || [...leftSet].some(t => !rightSet.has(t))) {
+        throw new UzonTypeError(
+          `Cannot compare unions with different member types: (${left.types.join(", ")}) vs (${right.types.join(", ")})`,
+          node.line, node.col,
+        );
+      }
+    }
+    // Same union type — compare inner values; different runtime types → false (not error)
+    left = left.value;
+    right = right.value;
+    try { assertSameType(left, right, node as AstNode); } catch { return [left, right]; }
+  } else {
+    if (left instanceof UzonUnion) left = left.value;
+    if (right instanceof UzonUnion) right = right.value;
+  }
 
   // §5: cross-category promotion for is/is not — adoptable int can adopt float type
   if (typeof left === "bigint" && typeof right === "number"
@@ -424,6 +451,13 @@ function evalComparison(
   if (rawLeft instanceof UzonTaggedUnion && rawRight instanceof UzonTaggedUnion) {
     throw new UzonTypeError(
       "Ordered comparison between two tagged union values is not supported — tags have no defined ordering",
+      node.line, node.col,
+    );
+  }
+  // §3.6 + §5.4: Ordered comparison on untagged union is a type error
+  if (rawLeft instanceof UzonUnion || rawRight instanceof UzonUnion) {
+    throw new UzonTypeError(
+      "Ordered comparison on untagged union values is not supported",
       node.line, node.col,
     );
   }
