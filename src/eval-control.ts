@@ -262,6 +262,13 @@ function evalCaseType(
         wc.line, wc.col,
       );
     }
+    // §3.6: validate that when-clause type name is valid even for non-union scrutinees
+    if (!memberTypes && !isValidTypeName(typeName, scope)) {
+      throw new UzonTypeError(
+        `'${typeName}' is not a valid type name`,
+        wc.line, wc.col,
+      );
+    }
     if (takenResult === undefined && valueMatchesTypeName(innerValue, typeName)) {
       takenResult = ctx.evalNode(wc.result, scope, exclude);
       takenNumType = ctx.numericType;
@@ -357,6 +364,18 @@ function defaultForType(typeName: string): UzonValue | undefined {
   if (typeName === "bool") return false;
   if (typeName === "null") return null;
   return undefined;
+}
+
+const BUILTIN_TYPE_NAMES = new Set([
+  "null", "bool", "string",
+  "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64",
+  "f32", "f64",
+]);
+
+function isValidTypeName(typeName: string, scope: Scope): boolean {
+  if (BUILTIN_TYPE_NAMES.has(typeName)) return true;
+  if (typeName.startsWith("[") || typeName.startsWith("(")) return true;
+  return !!scope.getType(typeName.split("."));
 }
 
 function valueMatchesTypeName(value: UzonValue, typeName: string): boolean {

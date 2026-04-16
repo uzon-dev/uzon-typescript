@@ -184,7 +184,13 @@ function evalIsOperands(
     // Same union type — compare inner values; different runtime types → false (not error)
     left = left.value;
     right = right.value;
-    try { assertSameType(left, right, node as AstNode); } catch { return [left, right]; }
+    try {
+      assertSameType(left, right, node as AstNode);
+    } catch (e) {
+      // §3.8: function comparison is always a type error, even inside unions
+      if (left instanceof UzonFunction || right instanceof UzonFunction) throw e;
+      return [left, right];
+    }
   } else {
     if (left instanceof UzonUnion) left = left.value;
     if (right instanceof UzonUnion) right = right.value;
@@ -254,31 +260,63 @@ function evalIsNamed(
 
 // ── Type check operator ──
 
+/** Built-in type names recognised by `is type` / `is not type`. */
+const BUILTIN_TYPES = new Set([
+  "null", "bool", "string",
+  "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64",
+  "f32", "f64",
+]);
+
 function evalIsTypeOp(
   ctx: EvalContext,
   node: { op: BinaryOp; left: AstNode; right: AstNode; line: number; col: number },
   scope: Scope, exclude?: string,
 ): boolean {
   const left = ctx.evalNode(node.left, scope, exclude);
+  const leftNumType = ctx.numericType ? actualType(ctx.numericType) : null;
   if (left === UZON_UNDEFINED) {
     throw new UzonRuntimeError("'is type' operand resolved to undefined", node.line, node.col);
   }
-  const typeNode = node.right as { path?: string[]; isNull?: boolean };
+  const typeNode = node.right as { path?: string[]; isNull?: boolean; isList?: boolean; isTuple?: boolean };
   const typeName = typeNode.isNull ? "null" : (typeNode.path?.join(".") ?? "");
-  const matches = valueMatchesType(left, typeName);
+
+  // §3.6: type name MUST be valid — check built-ins and user-defined types
+  if (!typeNode.isNull && !typeNode.isList && !typeNode.isTuple
+      && !BUILTIN_TYPES.has(typeName)
+      && !scope.getType(typeNode.path ?? [])) {
+    throw new UzonTypeError(
+      `'${typeName}' is not a valid type name`,
+      node.line, node.col,
+    );
+  }
+
+  const matches = valueMatchesType(left, typeName, leftNumType);
   return node.op === "is type" ? matches : !matches;
 }
 
-function valueMatchesType(value: UzonValue, typeName: string): boolean {
-  // Unwrap unions to check inner value's type
-  if (value instanceof UzonUnion) return valueMatchesType(value.value, typeName);
-  if (value instanceof UzonTaggedUnion) return valueMatchesType(value.value, typeName);
+function valueMatchesType(value: UzonValue, typeName: string, numType: string | null): boolean {
+  // §3.6/§3.7: Unwrap unions — determine inner type from union member types
+  if (value instanceof UzonUnion) {
+    const memberNumType = resolveUnionMemberNumType(value);
+    return valueMatchesType(value.value, typeName, memberNumType ?? numType);
+  }
+  if (value instanceof UzonTaggedUnion) {
+    const memberNumType = resolveTaggedUnionMemberNumType(value);
+    return valueMatchesType(value.value, typeName, memberNumType ?? numType);
+  }
 
   if (value === null) return typeName === "null";
   if (typeof value === "boolean") return typeName === "bool";
   if (typeof value === "string") return typeName === "string";
-  if (typeof value === "bigint") return /^[iu]\d+$/.test(typeName);
-  if (typeof value === "number") return /^f\d+$/.test(typeName);
+  if (typeof value === "bigint") {
+    if (!/^[iu]\d+$/.test(typeName)) return false;
+    // Exact numeric type match — e.g. i64 value only matches i64, not i32
+    return numType ? numType === typeName : typeName === "i64";
+  }
+  if (typeof value === "number") {
+    if (!/^f\d+$/.test(typeName)) return false;
+    return numType ? numType === typeName : typeName === "f64";
+  }
   if (Array.isArray(value)) return typeName.startsWith("[");
   if (value instanceof UzonEnum) {
     if (value.typeName && value.typeName === typeName) return true;
@@ -289,6 +327,29 @@ function valueMatchesType(value: UzonValue, typeName: string): boolean {
     return false;
   }
   return false;
+}
+
+/** Determine the numeric member type for an untagged union's inner value. */
+function resolveUnionMemberNumType(union: UzonUnion): string | null {
+  const val = union.value;
+  if (typeof val === "bigint") {
+    return union.types.find(t => /^[iu]\d+$/.test(t)) ?? null;
+  }
+  if (typeof val === "number") {
+    return union.types.find(t => /^f\d+$/.test(t)) ?? null;
+  }
+  return null;
+}
+
+/** Determine the numeric member type for a tagged union's inner value. */
+function resolveTaggedUnionMemberNumType(tu: UzonTaggedUnion): string | null {
+  const val = tu.value;
+  if (typeof val === "bigint" || typeof val === "number") {
+    // Tagged union variants have explicit types — use the current variant's type
+    const variantType = tu.variants.get(tu.tag);
+    if (variantType && /^[iuf]\d+$/.test(variantType)) return variantType;
+  }
+  return null;
 }
 
 // ── Membership operator ──
@@ -324,6 +385,21 @@ export function evalIn(
   left: UzonValue, right: UzonValue, node: AstNode,
   leftNumType?: string | null, rightNumType?: string | null,
 ): boolean {
+  // §5.8.1: function left operand + function element → type error
+  if (left instanceof UzonFunction) {
+    const hasFunc = Array.isArray(right)
+      ? right.some(el => el instanceof UzonFunction)
+      : right instanceof UzonTuple
+        ? right.elements.some(el => el instanceof UzonFunction)
+        : (right !== null && typeof right === "object" && !(right instanceof UzonEnum)
+           && !(right instanceof UzonUnion) && !(right instanceof UzonTaggedUnion)
+           && !(right instanceof UzonFunction))
+          ? Object.values(right as Record<string, UzonValue>).some(v => v instanceof UzonFunction)
+          : false;
+    if (hasFunc) {
+      throw new UzonTypeError("Cannot compare function values", node.line, node.col);
+    }
+  }
   // §5.8.1: list membership (type-checked)
   if (Array.isArray(right)) {
     if (left !== null && right.length > 0) {
@@ -524,8 +600,17 @@ function evalConcat(ctx: EvalContext, rawLeft: UzonValue, rawRight: UzonValue, n
         node.line, node.col,
       );
     }
+    // §5.8.2: element types must match exactly — e.g. [i32] ++ [i16] is a type error
+    const leftElemType = ctx.listElementTypes.get(left);
+    const rightElemType = ctx.listElementTypes.get(right);
+    if (leftElemType && rightElemType && leftElemType !== rightElemType) {
+      throw new UzonTypeError(
+        `Cannot concatenate lists with different element types (${leftElemType} vs ${rightElemType})`,
+        node.line, node.col,
+      );
+    }
     const result = [...left, ...right];
-    const elemType = ctx.listElementTypes.get(left) ?? ctx.listElementTypes.get(right);
+    const elemType = leftElemType ?? rightElemType;
     if (elemType) ctx.listElementTypes.set(result, elemType);
     return result;
   }

@@ -174,7 +174,7 @@ export class Evaluator implements EvalContext {
     for (const b of bindings) {
       const d = collectDeps(b.value, names);
       if (d.has(b.name) && b.value.kind === "FunctionExpr" && !hasPriorBinding.has(b.name)) {
-        throw new UzonTypeError(
+        throw new UzonCircularError(
           `Direct recursion detected: '${b.name}' references itself — the call graph must be a DAG`,
           b.line, b.col,
         );
@@ -637,8 +637,9 @@ export class Evaluator implements EvalContext {
   ): UzonValue {
     let source = this.evalNode(node.source, scope, exclude);
     if (source === UZON_UNDEFINED) return UZON_UNDEFINED;
-    // §3.7.1: tagged unions are transparent
+    // §3.7.1/§3.6: unions are transparent for member access
     if (source instanceof UzonTaggedUnion) source = source.value;
+    if (source instanceof UzonUnion) source = source.value;
     if (source === null || typeof source !== "object" || Array.isArray(source)
         || source instanceof UzonEnum || source instanceof UzonUnion
         || source instanceof UzonTuple || source instanceof UzonFunction) {

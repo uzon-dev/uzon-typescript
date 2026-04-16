@@ -83,7 +83,8 @@ function convertUndefined(
   node: { expr: AstNode; line: number; col: number },
   typeName: string,
 ): UzonValue {
-  // §5.11: env.X to bool/null is always invalid even when undefined
+  // §5.13: env values are typed as string even when undefined
+  // §5.11: string → bool / string → null are not in the conversion table
   if (node.expr.kind === "MemberAccess"
       && (node.expr as any).object?.kind === "EnvRef"
       && (typeName === "bool" || typeName === "null")) {
@@ -92,6 +93,7 @@ function convertUndefined(
       node.line, node.col,
     );
   }
+  // §5.11: undefined propagates through `to` regardless of target type
   if (/^[iuf]\d+$/.test(typeName)) ctx.numericType = typeName;
   return UZON_UNDEFINED;
 }
