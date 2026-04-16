@@ -10,7 +10,7 @@
 import type { AstNode, BinaryOp } from "./ast.js";
 import type { Scope } from "./scope.js";
 import {
-  UZON_UNDEFINED, UzonEnum, UzonUnion, UzonTaggedUnion,
+  UZON_UNDEFINED, UzonEnum, UzonUnion, UzonTaggedUnion, UzonTuple, UzonFunction,
   type UzonValue,
 } from "./value.js";
 import { UzonRuntimeError, UzonTypeError } from "./error.js";
@@ -297,43 +297,61 @@ export function evalIn(
   left: UzonValue, right: UzonValue, node: AstNode,
   leftNumType?: string | null, rightNumType?: string | null,
 ): boolean {
-  if (!Array.isArray(right)) {
-    throw new UzonTypeError("'in' requires a list on the right", node.line, node.col);
-  }
-  if (left !== null && right.length > 0) {
-    const leftCat = typeCategory(left);
-    const elemCat = listElementCategory(right);
-    if (elemCat !== null && leftCat !== elemCat) {
-      throw new UzonTypeError(
-        `'in' requires the value (${leftCat}) and list elements (${elemCat}) to be the same type`,
-        node.line, node.col,
-      );
-    }
-    // §3.5: Nominal enum type must also match
-    if (left instanceof UzonEnum && left.typeName) {
-      const firstEnum = right.find(el => el instanceof UzonEnum && el.typeName);
-      if (firstEnum instanceof UzonEnum && firstEnum.typeName && firstEnum.typeName !== left.typeName) {
+  // §5.8.1: list membership (type-checked)
+  if (Array.isArray(right)) {
+    if (left !== null && right.length > 0) {
+      const leftCat = typeCategory(left);
+      const elemCat = listElementCategory(right);
+      if (elemCat !== null && leftCat !== elemCat) {
         throw new UzonTypeError(
-          `'in' type mismatch: value is ${left.typeName} but list elements are ${firstEnum.typeName}`,
+          `'in' requires the value (${leftCat}) and list elements (${elemCat}) to be the same type`,
           node.line, node.col,
         );
       }
-    }
-    // §5.8.1: Numeric subtype must also match
-    if (leftNumType && rightNumType && (leftCat === "integer" || leftCat === "float")) {
-      const la = actualType(leftNumType);
-      const ra = actualType(rightNumType);
-      const lAdopt = isAdoptable(leftNumType);
-      const rAdopt = isAdoptable(rightNumType);
-      if (la && ra && la !== ra && !(lAdopt && rAdopt)) {
-        throw new UzonTypeError(
-          `'in' type mismatch: value is ${la} but list elements are ${ra}`,
-          node.line, node.col,
-        );
+      // §3.5: Nominal enum type must also match
+      if (left instanceof UzonEnum && left.typeName) {
+        const firstEnum = right.find(el => el instanceof UzonEnum && el.typeName);
+        if (firstEnum instanceof UzonEnum && firstEnum.typeName && firstEnum.typeName !== left.typeName) {
+          throw new UzonTypeError(
+            `'in' type mismatch: value is ${left.typeName} but list elements are ${firstEnum.typeName}`,
+            node.line, node.col,
+          );
+        }
+      }
+      // §5.8.1: Numeric subtype must also match
+      if (leftNumType && rightNumType && (leftCat === "integer" || leftCat === "float")) {
+        const la = actualType(leftNumType);
+        const ra = actualType(rightNumType);
+        const lAdopt = isAdoptable(leftNumType);
+        const rAdopt = isAdoptable(rightNumType);
+        if (la && ra && la !== ra && !(lAdopt && rAdopt)) {
+          throw new UzonTypeError(
+            `'in' type mismatch: value is ${la} but list elements are ${ra}`,
+            node.line, node.col,
+          );
+        }
       }
     }
+    return right.some(el => valuesEqual(left, el));
   }
-  return right.some(el => valuesEqual(left, el));
+  // §5.8.1: tuple membership — heterogeneous, type mismatches skip (no error)
+  if (right instanceof UzonTuple) {
+    return right.elements.some(el => {
+      if (el === UZON_UNDEFINED) return false;
+      try { return valuesEqual(left, el); } catch { return false; }
+    });
+  }
+  // §5.8.1: struct membership — value membership (not key). Key check is std.hasKey
+  if (right !== null && typeof right === "object"
+      && !(right instanceof UzonEnum) && !(right instanceof UzonUnion)
+      && !(right instanceof UzonTaggedUnion) && !(right instanceof UzonFunction)) {
+    const struct = right as Record<string, UzonValue>;
+    return Object.values(struct).some(v => {
+      if (v === UZON_UNDEFINED) return false;
+      try { return valuesEqual(left, v); } catch { return false; }
+    });
+  }
+  throw new UzonTypeError("'in' requires a list, tuple, or struct on the right", node.line, node.col);
 }
 
 // ── Arithmetic ──
