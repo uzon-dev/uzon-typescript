@@ -39,6 +39,15 @@ export function parseFunctionExpr(ctx: ParseContext): AstNode {
     }
   }
 
+  // §3.8: Reject duplicate parameter names
+  for (let i = 1; i < params.length; i++) {
+    for (let j = 0; j < i; j++) {
+      if (params[i].name === params[j].name) {
+        ctx.error(`Duplicate parameter name '${params[i].name}'`, { line: params[i].line, col: params[i].col } as any);
+      }
+    }
+  }
+
   ctx.expect(TokenType.Returns, "'returns'");
   const returnType = ctx.parseTypeExpr();
 

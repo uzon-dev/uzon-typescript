@@ -200,45 +200,53 @@ export class Evaluator implements EvalContext {
     }
 
     // Step 4: Evaluate non-cycle bindings via partial topological order.
-    // Catching circular errors from imports so other bindings can still be evaluated.
+    // All errors are collected so that multiple problems are reported at once.
     const preCount = this.collectedErrors.length;
-    let hadNestedCircular = false;
+    let hadErrors = cycleNames.length > 0 || fnCycleNames.size > 0;
     for (const name of order) {
       if (fnCycleNames.has(name)) continue;
       const b = bindingMap.get(name)!;
 
-      // Inline validation
+      // Inline validation — collect and continue
       if (b.value.kind === "UndefinedLiteral") {
-        throw new UzonTypeError(
+        this.collectedErrors.push(new UzonTypeError(
           `Cannot assign literal 'undefined' to '${b.name}' — undefined is a state, not a value`,
           b.value.line, b.value.col,
-        );
-      }
-      if (b.value.kind === "ListLiteral"
-          && (b.value as { elements: AstNode[] }).elements.length === 0) {
-        throw new UzonTypeError(
-          "Empty list requires a type annotation — use 'as [Type]' (e.g., [] as [i32])",
-          b.value.line, b.value.col,
-        );
-      }
-      if (b.value.kind === "ListLiteral") {
-        const elems = (b.value as { elements: AstNode[] }).elements;
-        if (elems.length > 0 && elems.every(e => e.kind === "NullLiteral")) {
-          throw new UzonTypeError(
-            "All-null list requires a type annotation — use 'as [Type]' (e.g., [null] as [i32])",
-            b.value.line, b.value.col,
-          );
-        }
+        ));
+        hadErrors = true;
+        continue;
       }
       if (b.value.kind === "EnvRef") {
-        throw new UzonTypeError(
+        this.collectedErrors.push(new UzonTypeError(
           "standalone env is not a value; use env.VARIABLE_NAME",
           b.value.line, b.value.col,
-        );
+        ));
+        hadErrors = true;
+        continue;
       }
 
       try {
         let val = this.evalNode(b.value, scope, name);
+
+        // Post-eval validation
+        if (b.value.kind === "ListLiteral" && Array.isArray(val) && val.length === 0) {
+          this.collectedErrors.push(new UzonTypeError(
+            "Empty list requires a type annotation — use 'as [Type]' (e.g., [] as [i32])",
+            b.value.line, b.value.col,
+          ));
+          hadErrors = true;
+          continue;
+        }
+        if (b.value.kind === "ListLiteral" && Array.isArray(val)
+            && val.length > 0 && val.every(e => e === null)) {
+          this.collectedErrors.push(new UzonTypeError(
+            "All-null list requires a type annotation — use 'as [Type]' (e.g., [null] as [i32])",
+            b.value.line, b.value.col,
+          ));
+          hadErrors = true;
+          continue;
+        }
+
         if (b.calledName) val = this.applyCalledName(val, b.calledName);
         scope.set(name, val);
         if (locals && val !== UZON_UNDEFINED) locals.set(name, val);
@@ -250,15 +258,17 @@ export class Evaluator implements EvalContext {
           if (this.collectedErrors.length === preCount) {
             this.collectedErrors.push(e);
           }
-          hadNestedCircular = true;
-          continue;
+        } else if (e instanceof UzonError) {
+          this.collectedErrors.push(e);
+        } else {
+          throw e; // non-Uzon errors (e.g. OOM) propagate
         }
-        throw e;
+        hadErrors = true;
       }
     }
 
-    // If any cycle errors were found, throw to signal failure
-    if (cycleNames.length > 0 || fnCycleNames.size > 0 || hadNestedCircular) {
+    // If any errors were found, throw to signal failure
+    if (hadErrors) {
       throw this.collectedErrors[this.collectedErrors.length - 1];
     }
   }
