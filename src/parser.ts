@@ -220,9 +220,101 @@ export class Parser implements ParseContext {
       };
     }
 
+    // §3.2 / §3.5 / §3.6 / §3.7: Standalone type declarations at binding position.
+    // The binding name becomes the type name — synthesized here via calledName.
+    const standalone = this.tryParseStandaloneTypeDecl(name, nameTok);
+    if (standalone) return standalone;
+
     const value = this.parseExpression();
     const calledName = this.tryParseCalled();
     return { kind: "Binding", name, value, calledName, line: nameTok.line, col: nameTok.col };
+  }
+
+  /**
+   * §3.2 / §3.5 / §3.6 / §3.7: Detect and parse a standalone type declaration
+   * after `is`. Returns a complete Binding node (with auto-populated calledName)
+   * or null if the upcoming tokens are not a standalone type declaration.
+   */
+  private tryParseStandaloneTypeDecl(name: string, nameTok: Token): BindingNode | null {
+    this.skipNewlines();
+    const first = this.peek();
+
+    // `A is struct { ... }` — distinct from `A is struct "path"` (import expression)
+    if (first.type === TokenType.Struct) {
+      const after = this.peek(1);
+      if (after.type === TokenType.LBrace) {
+        this.advance(); // consume 'struct'
+        const body = parseStructLiteral(this);
+        this.rejectCalled("struct");
+        return { kind: "Binding", name, value: body, calledName: name, line: nameTok.line, col: nameTok.col };
+      }
+    }
+
+    // `A is enum v1, v2, ...`
+    if (first.type === TokenType.Enum) {
+      const enumTok = this.advance();
+      this.skipNewlines();
+      const variants = this.parseEnumVariants();
+      this.rejectCalled("enum");
+      const valueNode: AstNode = variants.length > 0
+        ? { kind: "Identifier", name: variants[0], line: enumTok.line, col: enumTok.col }
+        : { kind: "NullLiteral", line: enumTok.line, col: enumTok.col };
+      const fromEnum: AstNode = {
+        kind: "FromEnum", value: valueNode, variants,
+        line: enumTok.line, col: enumTok.col,
+      };
+      return { kind: "Binding", name, value: fromEnum, calledName: name, line: nameTok.line, col: nameTok.col };
+    }
+
+    // `A is tagged union v1 as T1, v2 as T2, ...`
+    if (first.type === TokenType.Tagged) {
+      const taggedTok = this.advance();
+      this.skipNewlines();
+      this.expect(TokenType.Union, "'union' after 'tagged'");
+      const variants = this.parseTaggedUnionVariants();
+      this.rejectCalled("tagged union");
+      const decl: AstNode = {
+        kind: "StandaloneTaggedUnion", variants,
+        line: taggedTok.line, col: taggedTok.col,
+      };
+      return { kind: "Binding", name, value: decl, calledName: name, line: nameTok.line, col: nameTok.col };
+    }
+
+    // `A is union T1, T2, ...`
+    if (first.type === TokenType.Union) {
+      const unionTok = this.advance();
+      this.skipNewlines();
+      const types: TypeExprNode[] = [];
+      types.push(this.parseTypeExpr());
+      while (this.peek().type === TokenType.Comma) {
+        if (this.isCommaFollowedByBinding()) break;
+        this.advance();
+        this.skipNewlines();
+        types.push(this.parseTypeExpr());
+      }
+      this.rejectCalled("union");
+      const decl: AstNode = {
+        kind: "StandaloneUnion", types,
+        line: unionTok.line, col: unionTok.col,
+      };
+      return { kind: "Binding", name, value: decl, calledName: name, line: nameTok.line, col: nameTok.col };
+    }
+
+    return null;
+  }
+
+  /**
+   * §3.6/§3.7: `called` is forbidden on standalone type declarations —
+   * the binding name is already the type name.
+   */
+  private rejectCalled(kind: string): void {
+    this.skipNewlines();
+    if (this.peek().type === TokenType.Called) {
+      this.error(
+        `'called' is not permitted on standalone ${kind} declarations — the binding name already names the type`,
+        this.peek(),
+      );
+    }
   }
 
   /**

@@ -201,6 +201,24 @@ export interface NamedVariantNode extends NodeBase {
   variants: [string, TypeExprNode][] | null; // null when using `as TypeName`
 }
 
+/**
+ * §3.6: Standalone union declaration — `A is union Type1, Type2, ...`.
+ * Evaluator synthesizes the default value of the first member type.
+ */
+export interface StandaloneUnionNode extends NodeBase {
+  kind: "StandaloneUnion";
+  types: TypeExprNode[];
+}
+
+/**
+ * §3.7: Standalone tagged union declaration — `A is tagged union v1 as T1, v2 as T2, ...`.
+ * Evaluator synthesizes the default value of the first variant's type, tagged with the first variant's name.
+ */
+export interface StandaloneTaggedUnionNode extends NodeBase {
+  kind: "StandaloneTaggedUnion";
+  variants: [string, TypeExprNode][];
+}
+
 /** Field extraction: `name is of source` (§5.14) */
 export interface FieldExtractionNode extends NodeBase {
   kind: "FieldExtraction";
@@ -299,6 +317,8 @@ export type AstNode =
   | FromEnumNode
   | FromUnionNode
   | NamedVariantNode
+  | StandaloneUnionNode
+  | StandaloneTaggedUnionNode
   | FieldExtractionNode
   | FunctionExprNode
   | StructLiteralNode

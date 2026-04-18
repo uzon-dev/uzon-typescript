@@ -86,6 +86,10 @@ function walkDeps(node: AstNode, deps: Set<string>, scopeNames: Set<string>): vo
     case "NamedVariant":
       walkDeps(node.value, deps, scopeNames);
       break;
+    case "StandaloneUnion":
+    case "StandaloneTaggedUnion":
+      // Type references only — no binding deps.
+      break;
     case "FieldExtraction":
       walkDeps(node.source, deps, scopeNames);
       break;
@@ -205,6 +209,7 @@ function walkCalls(node: AstNode, funcNames: Set<string>, edges: CallEdge[]): vo
     case "FromEnum": walkCalls(node.value, funcNames, edges); break;
     case "FromUnion": walkCalls(node.value, funcNames, edges); break;
     case "NamedVariant": walkCalls(node.value, funcNames, edges); break;
+    case "StandaloneUnion": case "StandaloneTaggedUnion": break;
     case "FieldExtraction": walkCalls(node.source, funcNames, edges); break;
     case "StructLiteral":
       for (const f of node.fields) walkCalls(f.value, funcNames, edges);

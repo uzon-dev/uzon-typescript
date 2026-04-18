@@ -370,6 +370,8 @@ export class Evaluator implements EvalContext {
       case "FromEnum": return this.evalFromEnum(node, scope, exclude);
       case "FromUnion": return this.evalFromUnion(node, scope, exclude);
       case "NamedVariant": return this.evalNamedVariant(node, scope, exclude);
+      case "StandaloneUnion": return this.evalStandaloneUnion(node, scope);
+      case "StandaloneTaggedUnion": return this.evalStandaloneTaggedUnion(node, scope);
       case "FieldExtraction": return this.evalFieldExtraction(node, scope, exclude);
 
       case "FunctionExpr": return evalFunctionExpr(this, node, scope, exclude);
@@ -582,6 +584,164 @@ export class Evaluator implements EvalContext {
       );
     }
     return new UzonEnum(variantName, node.variants);
+  }
+
+  /**
+   * §3.6: Default value of a type for standalone union declarations.
+   * Returns null if the type has no default (function, nested anon union).
+   */
+  private defaultValueForType(type: TypeExprNode, scope: Scope): UzonValue | null {
+    if (type.isNull) return null;
+    if (type.isList) return [] as UzonValue[];
+    if (type.isTuple) {
+      // Non-empty tuple: default each element; empty tuple: ()
+      if (!type.tupleElements || type.tupleElements.length === 0) return new UzonTuple([]);
+      const elems: UzonValue[] = [];
+      for (const t of type.tupleElements) {
+        const d = this.defaultValueForType(t, scope);
+        if (d === null && !t.isNull) {
+          // A tuple element with no default — propagate failure.
+          return null;
+        }
+        elems.push(d);
+      }
+      return new UzonTuple(elems);
+    }
+    const typeName = type.path.join(".");
+    if (/^[iu]\d+$/.test(typeName)) return 0n;
+    if (/^f\d+$/.test(typeName)) return 0.0;
+    if (typeName === "string") return "";
+    if (typeName === "bool") return false;
+    if (typeName === "null") return null;
+    if (typeName === "function") return null; // error marker: no default
+    // Named type — look up
+    const typeDef = scope.getType(type.path);
+    if (typeDef) {
+      if (typeDef.kind === "enum" && typeDef.variants && typeDef.variants.length > 0) {
+        return new UzonEnum(typeDef.variants[0], typeDef.variants, typeDef.name);
+      }
+      if (typeDef.kind === "struct" && typeDef.templateValue) {
+        return { ...typeDef.templateValue } as UzonValue;
+      }
+      if (typeDef.kind === "tagged_union" && typeDef.variants && typeDef.variants.length > 0) {
+        const firstTag = typeDef.variants[0];
+        const firstTypeName = typeDef.variantTypes?.get(firstTag);
+        let inner: UzonValue = null;
+        if (firstTypeName) {
+          inner = this.defaultValueForNamedType(firstTypeName, scope);
+        }
+        const variantsMap = new Map<string, string | null>();
+        for (const v of typeDef.variants) {
+          variantsMap.set(v, typeDef.variantTypes?.get(v) ?? null);
+        }
+        return new UzonTaggedUnion(inner, firstTag, variantsMap, typeDef.name);
+      }
+      if (typeDef.kind === "union") {
+        // Nested named union is allowed — not an anonymous nested union
+        if (typeDef.memberTypes && typeDef.memberTypes.length > 0) {
+          const inner = this.defaultValueForNamedType(typeDef.memberTypes[0], scope);
+          return new UzonUnion(inner, typeDef.memberTypes, typeDef.name);
+        }
+      }
+      if (typeDef.kind === "function") return null; // no default
+    }
+    return null;
+  }
+
+  /** Lookup + default by string type name (for named-type chains). */
+  private defaultValueForNamedType(typeName: string, scope: Scope): UzonValue {
+    if (/^[iu]\d+$/.test(typeName)) return 0n;
+    if (/^f\d+$/.test(typeName)) return 0.0;
+    if (typeName === "string") return "";
+    if (typeName === "bool") return false;
+    if (typeName === "null") return null;
+    const typeDef = scope.getType(typeName.split("."));
+    if (!typeDef) return null;
+    if (typeDef.kind === "enum" && typeDef.variants?.length) {
+      return new UzonEnum(typeDef.variants[0], typeDef.variants, typeDef.name);
+    }
+    if (typeDef.kind === "struct" && typeDef.templateValue) {
+      return { ...typeDef.templateValue } as UzonValue;
+    }
+    return null;
+  }
+
+  private evalStandaloneUnion(
+    node: { kind: "StandaloneUnion"; types: TypeExprNode[]; line: number; col: number },
+    scope: Scope,
+  ): UzonValue {
+    if (node.types.length < 2) {
+      throw new UzonTypeError("A union must have at least two member types", node.line, node.col);
+    }
+    // §3.6: duplicate member types in union are a type error.
+    const seen = new Set<string>();
+    for (const t of node.types) {
+      const name = typeExprToString(t);
+      if (seen.has(name)) {
+        throw new UzonTypeError(`duplicate type "${name}" in union`, node.line, node.col);
+      }
+      seen.add(name);
+    }
+    const first = node.types[0];
+    const firstName = typeExprToString(first);
+    // §3.6: function or nested anonymous union as first member → type error
+    if (firstName === "function") {
+      throw new UzonTypeError(
+        "Standalone union declaration cannot use 'function' as first member — use inline 'from union' with an explicit value",
+        node.line, node.col,
+      );
+    }
+    // Detect nested anonymous union — a TypeExpr whose path is a single
+    // unknown name that happens to be a union is fine (it's *named*);
+    // but anonymous nested unions can only appear through unusual constructs
+    // and are not syntactically expressible in a TypeExpr. So we accept
+    // all path-based types here and just compute the default.
+    const defaultVal = this.defaultValueForType(first, scope);
+    if (defaultVal === null && !first.isNull && firstName !== "null") {
+      throw new UzonTypeError(
+        `Standalone union declaration cannot use '${firstName}' as first member — type has no default value`,
+        node.line, node.col,
+      );
+    }
+    const typeNames = node.types.map(t => typeExprToString(t));
+    return new UzonUnion(defaultVal, typeNames);
+  }
+
+  private evalStandaloneTaggedUnion(
+    node: { kind: "StandaloneTaggedUnion"; variants: [string, TypeExprNode][]; line: number; col: number },
+    scope: Scope,
+  ): UzonValue {
+    if (node.variants.length < 2) {
+      throw new UzonTypeError("A tagged union must have at least two variants", node.line, node.col);
+    }
+    // §3.7: duplicate variant names are a type error.
+    const seen = new Set<string>();
+    for (const [name] of node.variants) {
+      if (seen.has(name)) {
+        throw new UzonTypeError(`duplicate variant "${name}" in tagged union`, node.line, node.col);
+      }
+      seen.add(name);
+    }
+    const [firstTag, firstType] = node.variants[0];
+    const firstName = typeExprToString(firstType);
+    if (firstName === "function") {
+      throw new UzonTypeError(
+        "Standalone tagged union declaration cannot use 'function' as first variant's type — use inline 'named' + 'from' with an explicit value",
+        node.line, node.col,
+      );
+    }
+    const defaultVal = this.defaultValueForType(firstType, scope);
+    if (defaultVal === null && !firstType.isNull && firstName !== "null") {
+      throw new UzonTypeError(
+        `Standalone tagged union declaration cannot use '${firstName}' as first variant's type — type has no default value`,
+        node.line, node.col,
+      );
+    }
+    const variantsMap = new Map<string, string | null>();
+    for (const [name, type] of node.variants) {
+      variantsMap.set(name, type.isNull ? null : typeExprToString(type));
+    }
+    return new UzonTaggedUnion(defaultVal, firstTag, variantsMap);
   }
 
   private evalFromUnion(
@@ -953,7 +1113,8 @@ export class Evaluator implements EvalContext {
       if (valueNode.kind === "StructLiteral") {
         for (const field of (valueNode as StructLiteralNode).fields) {
           if (field.value.kind === "TypeAnnotation") {
-            const typePath = field.value.type.path.join(".");
+            const typeNode = field.value.type;
+            const typePath = typeNode.path.join(".");
             fieldAnnotations.set(field.name, typePath);
           }
         }

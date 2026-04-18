@@ -37,6 +37,8 @@ export enum TokenType {
   Named,
   With,
   Union,
+  Enum,    // "enum" keyword for standalone enum declaration (§3.5)
+  Tagged,  // "tagged" keyword, combines with Union as `tagged union` (§3.7)
   PlusKw,  // "plus" keyword for struct extension (§3.2.2)
   Type,    // "type" keyword for runtime type check (§5.2)
 
@@ -140,6 +142,8 @@ export const KEYWORDS: Record<string, TokenType> = {
   named: TokenType.Named,
   with: TokenType.With,
   union: TokenType.Union,
+  enum: TokenType.Enum,
+  tagged: TokenType.Tagged,
   plus: TokenType.PlusKw,
   type: TokenType.Type,
   to: TokenType.To,
