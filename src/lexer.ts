@@ -47,6 +47,11 @@ export class Lexer {
   private tokens: Token[] = [];
   private modeStack: Mode[] = [Mode.Normal];
   private braceDepth: number[] = [];
+  /** §4.4.1: token count snapshot when each interpolation opened — used to
+   * detect empty interpolations `{}` (no tokens between `{` and `}`). */
+  private interpOpenTokenCount: number[] = [];
+  /** §4.4.1: line/col of each opening `{` for empty-interpolation error reporting. */
+  private interpOpenPos: { line: number; col: number }[] = [];
   /** §4.4.2: track whether last consumed content was a comment. */
   private lastWasComment = false;
 
@@ -193,9 +198,22 @@ export class Lexer {
     if (c !== "}" || this.modeStack[this.modeStack.length - 1] !== Mode.Interpolation) return false;
     const depth = this.braceDepth[this.braceDepth.length - 1];
     if (depth !== 0) return false;
+    // §4.4.1: an interpolation must contain an expression. If no non-newline
+    // tokens were emitted between the opening `{` and this `}`, reject it.
+    const openCount = this.interpOpenTokenCount[this.interpOpenTokenCount.length - 1];
+    let hasContent = false;
+    for (let i = openCount; i < this.tokens.length; i++) {
+      if (this.tokens[i].type !== TokenType.Newline) { hasContent = true; break; }
+    }
+    if (!hasContent) {
+      const pos = this.interpOpenPos[this.interpOpenPos.length - 1];
+      this.error("Empty interpolation '{}' is not allowed — expression required", pos.line, pos.col);
+    }
     this.advance();
     this.braceDepth.pop();
     this.modeStack.pop();
+    this.interpOpenTokenCount.pop();
+    this.interpOpenPos.pop();
     this.push(TokenType.String, "", this.line, this.col);
     return true;
   }
@@ -351,9 +369,13 @@ export class Lexer {
         tok.value = parts.join("");
         parts.length = 0;
 
+        const openLine = this.line;
+        const openCol = this.col;
         this.advance();
         this.modeStack.push(Mode.Interpolation);
         this.braceDepth.push(0);
+        this.interpOpenTokenCount.push(this.tokens.length);
+        this.interpOpenPos.push({ line: openLine, col: openCol });
         return;
       }
 
