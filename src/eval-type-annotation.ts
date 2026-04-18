@@ -150,6 +150,15 @@ function annotateAsStruct(
       node.line, node.col,
     );
   }
+  // §3.2.1/§6.1: nominal struct types — a value already named as one
+  // named struct type cannot be re-annotated as a different named type.
+  const existingName = ctx.structTypeNames.get(val as Record<string, UzonValue>);
+  if (existingName && existingName !== typeDef.name) {
+    throw new UzonTypeError(
+      `Cannot annotate value of named struct type '${existingName}' as different named struct type '${typeName}'`,
+      node.line, node.col,
+    );
+  }
   if (typeDef.templateValue) {
     checkStructConformance(
       ctx,
@@ -158,7 +167,7 @@ function annotateAsStruct(
       typeName, node as AstNode, typeDef.fieldAnnotations,
     );
   }
-  if (!ctx.structTypeNames.has(val as Record<string, UzonValue>)) {
+  if (!existingName) {
     ctx.structTypeNames.set(val as Record<string, UzonValue>, typeDef.name);
   }
   return val;
