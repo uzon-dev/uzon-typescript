@@ -332,11 +332,13 @@ export class Parser implements ParseContext {
       elements.push(this.parseExpression());
     }
 
-    // Lift trailing `as` from the last element to the list level
+    // Lift trailing `as [T]` from the last element to the list level.
+    // A non-list `as T` is kept per-element — users commonly write
+    // `e1 as T, e2 as T, e3 as T` to annotate each list element.
     let typeAnnotation: TypeExprNode | null = null;
     if (elements.length > 0) {
       const last = elements[elements.length - 1];
-      if (last.kind === "TypeAnnotation") {
+      if (last.kind === "TypeAnnotation" && last.type.isList) {
         typeAnnotation = last.type;
         elements[elements.length - 1] = last.expr;
       }
