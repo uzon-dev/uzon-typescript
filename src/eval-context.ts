@@ -9,7 +9,7 @@
  * the evaluator without creating circular dependencies.
  */
 
-import type { AstNode, BindingNode } from "./ast.js";
+import type { AstNode, BindingNode, TypeExprNode } from "./ast.js";
 import type { Scope } from "./scope.js";
 import type { UzonValue, UzonFunction } from "./value.js";
 
@@ -20,6 +20,7 @@ export interface EvalContext {
 
   // Contextual resolution (needs evaluator state)
   resolveEnumVariantOrEval(node: AstNode, contextVal: UzonValue, scope: Scope, exclude?: string): UzonValue;
+  evalInContext(node: AstNode, typeExpr: TypeExprNode, scope: Scope, exclude?: string): UzonValue;
 
   // Cross-module operations
   evalIn(left: UzonValue, right: UzonValue, node: AstNode, leftNumType?: string | null, rightNumType?: string | null): boolean;

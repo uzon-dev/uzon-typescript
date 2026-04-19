@@ -803,6 +803,34 @@ export class Parser implements ParseContext {
 
   // ── Primary expressions ────────────────────────────────────
 
+  /** §3.7 v0.10: Tokens that begin a primary expression (for variant shorthand lookahead). */
+  private isPrimaryStart(type: TokenType): boolean {
+    switch (type) {
+      case TokenType.Integer:
+      case TokenType.Float:
+      case TokenType.Inf:
+      case TokenType.Nan:
+      case TokenType.True:
+      case TokenType.False:
+      case TokenType.Null:
+      case TokenType.String:
+      case TokenType.Env:
+      case TokenType.Identifier:
+      case TokenType.LBrace:
+      case TokenType.LBracket:
+      case TokenType.If:
+      case TokenType.Case:
+      case TokenType.Function:
+      case TokenType.Enum:
+      case TokenType.Union:
+      case TokenType.Tagged:
+      case TokenType.Struct:
+        return true;
+      default:
+        return false;
+    }
+  }
+
   private parsePrimary(): AstNode {
     this.skipNewlines();
     const tok = this.peek();
@@ -841,9 +869,22 @@ export class Parser implements ParseContext {
       case TokenType.Env:
         this.advance();
         return { kind: "EnvRef", line: tok.line, col: tok.col };
-      case TokenType.Identifier:
+      case TokenType.Identifier: {
         this.advance();
+        // §3.7 v0.10: variant shorthand — `variant_name primary`.
+        // If same-line next token starts a primary, form a VariantShorthand.
+        // `(` is excluded — always treated as function call suffix at parseCallOrAccess.
+        // Interpolation continuation strings are excluded so `"{name}!"` parses correctly.
+        const next = this.peekRaw();
+        if (next.line === tok.line && this.isPrimaryStart(next.type) && !next.isInterpCont) {
+          const inner = this.parsePrimary();
+          return {
+            kind: "VariantShorthand", variantName: tok.value, inner,
+            line: tok.line, col: tok.col,
+          };
+        }
         return { kind: "Identifier", name: tok.value, line: tok.line, col: tok.col };
+      }
       case TokenType.LBrace:
         return parseStructLiteral(this);
       case TokenType.LBracket:

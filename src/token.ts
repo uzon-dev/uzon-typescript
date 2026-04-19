@@ -123,6 +123,13 @@ export interface Token {
   col: number;
   /** True on Newline tokens that follow a comment on the preceding line. */
   afterComment?: boolean;
+  /**
+   * §4.4.1: True on String tokens that represent interpolation continuation
+   * (the string text after `}` closing an interpolation). Used by the parser
+   * to distinguish these from new string literals so variant shorthand
+   * (§3.7 v0.10) doesn't greedily consume them as inner primary.
+   */
+  isInterpCont?: boolean;
 }
 
 // ── Keyword map (§2.5) ────────────────────────────────────────────

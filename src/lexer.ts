@@ -214,7 +214,10 @@ export class Lexer {
     this.modeStack.pop();
     this.interpOpenTokenCount.pop();
     this.interpOpenPos.pop();
-    this.push(TokenType.String, "", this.line, this.col);
+    this.tokens.push({
+      type: TokenType.String, value: "",
+      line: this.line, col: this.col, isInterpCont: true,
+    });
     return true;
   }
 

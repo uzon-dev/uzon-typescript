@@ -14,6 +14,7 @@
 
 import type { UzonValue } from "./value.js";
 import { UZON_UNDEFINED } from "./value.js";
+import type { TypeExprNode } from "./ast.js";
 
 // ── TypeDef ──────────────────────────────────────────────────────
 
@@ -30,6 +31,8 @@ export interface TypeDef {
   fields?: Map<string, string>;
   /** §6.3: Per-field type annotations from AST (for range checking) */
   fieldAnnotations?: Map<string, string>;
+  /** §3.2 v0.10: Per-field declared type expressions (for context inference) */
+  fieldTypeExprs?: Map<string, TypeExprNode>;
   /** §3.2: Struct template value (for conformance checking) */
   templateValue?: Record<string, any>;
   /** §3.4: List element type name */

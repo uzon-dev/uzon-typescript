@@ -219,6 +219,17 @@ export interface StandaloneTaggedUnionNode extends NodeBase {
   variants: [string, TypeExprNode][];
 }
 
+/**
+ * §3.7 v0.10: Variant shorthand — `variant_name primary`.
+ * Expanded at eval time to `inner as TypeName named variant_name`
+ * when the tagged union type is determinable from context.
+ */
+export interface VariantShorthandNode extends NodeBase {
+  kind: "VariantShorthand";
+  variantName: string;
+  inner: AstNode;
+}
+
 /** Field extraction: `name is of source` (§5.14) */
 export interface FieldExtractionNode extends NodeBase {
   kind: "FieldExtraction";
@@ -319,6 +330,7 @@ export type AstNode =
   | NamedVariantNode
   | StandaloneUnionNode
   | StandaloneTaggedUnionNode
+  | VariantShorthandNode
   | FieldExtractionNode
   | FunctionExprNode
   | StructLiteralNode

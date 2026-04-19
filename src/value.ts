@@ -122,6 +122,9 @@ export class UzonFunction {
     public readonly finalExpr: unknown,
     public readonly closureScope: unknown,
     public readonly typeName: string | null = null,
+    /** §3.5/§3.7 v0.10: original TypeExprNodes preserved for context inference. */
+    public readonly paramTypeExprs: readonly unknown[] = [],
+    public readonly returnTypeExpr: unknown = null,
   ) {}
 
   toString(): string {

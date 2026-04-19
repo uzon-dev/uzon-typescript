@@ -288,6 +288,7 @@ export class Evaluator implements EvalContext {
       return new UzonFunction(
         val.paramNames, val.paramTypes, val.defaultValues,
         val.returnType, val.body, val.finalExpr, val.closureScope, calledName,
+        val.paramTypeExprs, val.returnTypeExpr,
       );
     }
     if (val !== null && typeof val === "object" && !Array.isArray(val)
@@ -372,6 +373,14 @@ export class Evaluator implements EvalContext {
       case "NamedVariant": return this.evalNamedVariant(node, scope, exclude);
       case "StandaloneUnion": return this.evalStandaloneUnion(node, scope);
       case "StandaloneTaggedUnion": return this.evalStandaloneTaggedUnion(node, scope);
+      case "VariantShorthand":
+        // §3.7 v0.10: variant shorthand requires type context. It should be
+        // intercepted by evalTypeAnnotation, struct field eval, or function
+        // argument eval. Reaching here means no context is available.
+        throw new UzonTypeError(
+          `Variant shorthand '${node.variantName} ...' requires type context — use 'as TypeName' or place in a typed position`,
+          node.line, node.col,
+        );
       case "FieldExtraction": return this.evalFieldExtraction(node, scope, exclude);
 
       case "FunctionExpr": return evalFunctionExpr(this, node, scope, exclude);
@@ -470,6 +479,220 @@ export class Evaluator implements EvalContext {
       }
     }
     return this.evalNode(node, scope, exclude);
+  }
+
+  /**
+   * §3.5 + §3.7 v0.10: Context-aware evaluation.
+   *
+   * Evaluate `node` with the expected type `typeExpr` as context. Enables:
+   *   - VariantShorthand resolution against a tagged union type
+   *   - Bare Identifier as enum variant or nullary tagged-union variant
+   *   - StructLiteral with a named struct type — applies field defaults and
+   *     recurses with each field's declared type
+   *   - ListLiteral with a typed element — recurses per element
+   *
+   * Returns the annotated value. Callers are responsible for any outer
+   * validation (e.g., list homogeneity, struct nominal identity).
+   */
+  evalInContext(
+    node: AstNode, typeExpr: TypeExprNode, scope: Scope, exclude?: string,
+  ): UzonValue {
+    // List with element type context
+    if (typeExpr.isList && typeExpr.inner && node.kind === "ListLiteral") {
+      const elements: UzonValue[] = [];
+      for (const elem of node.elements) {
+        const v = this.evalInContext(elem, typeExpr.inner, scope, exclude);
+        if (v === UZON_UNDEFINED) {
+          throw new UzonRuntimeError(`List element resolved to undefined`, elem.line, elem.col);
+        }
+        elements.push(v);
+      }
+      this.listElementTypes.set(elements, typeExpr.inner.path.join("."));
+      return elements;
+    }
+
+    const typeDef = scope.getType(typeExpr.path);
+
+    // VariantShorthand requires tagged union context
+    if (node.kind === "VariantShorthand") {
+      if (typeDef && typeDef.kind === "tagged_union") {
+        return this.expandVariantShorthand(node, typeDef, scope, exclude);
+      }
+      throw new UzonTypeError(
+        `Variant shorthand '${node.variantName} ...' requires a tagged union type context, got '${typeExpr.path.join(".")}'`,
+        node.line, node.col,
+      );
+    }
+
+    // Bare Identifier in inference position — try variant resolution if not a binding
+    if (node.kind === "Identifier" && typeDef) {
+      const name = node.name;
+      const bindingPresent = scope.has(name) && name !== exclude;
+      if (!bindingPresent) {
+        if (typeDef.kind === "enum" && typeDef.variants?.includes(name)) {
+          return new UzonEnum(name, typeDef.variants, typeDef.name);
+        }
+        if (typeDef.kind === "tagged_union" && typeDef.variants?.includes(name)) {
+          // Must be a nullary variant (inner type is null/absent)
+          const innerType = typeDef.variantTypes?.get(name);
+          if (innerType === undefined || innerType === null) {
+            const variantsMap = new Map<string, string | null>();
+            for (const v of typeDef.variants) {
+              variantsMap.set(v, typeDef.variantTypes?.get(v) ?? null);
+            }
+            return new UzonTaggedUnion(null, name, variantsMap, typeDef.name);
+          }
+          throw new UzonTypeError(
+            `Variant '${name}' of tagged union '${typeDef.name}' is not nullary — provide an inner value`,
+            node.line, node.col,
+          );
+        }
+      }
+    }
+
+    // StructLiteral with named struct context — fill defaults and recurse
+    if (node.kind === "StructLiteral" && typeDef && typeDef.kind === "struct") {
+      return this.evalStructLiteralInContext(node, typeDef, scope, exclude);
+    }
+
+    // §3.7 v0.10: `variant(args)` / `variant (args)` — parsed as FunctionCall
+    // but in a tagged union context with no matching binding, treated as variant
+    // shorthand. Single arg becomes the inner value; multiple args become a tuple.
+    if (
+      node.kind === "FunctionCall" && node.callee.kind === "Identifier"
+      && typeDef && typeDef.kind === "tagged_union"
+    ) {
+      const variantName = node.callee.name;
+      const bindingPresent = scope.has(variantName) && variantName !== exclude;
+      if (!bindingPresent && typeDef.variants?.includes(variantName)) {
+        const innerNode: AstNode = node.args.length === 1
+          ? node.args[0]
+          : {
+              kind: "TupleLiteral",
+              elements: node.args,
+              line: node.line, col: node.col,
+            };
+        return this.expandVariantShorthand(
+          { variantName, inner: innerNode, line: node.line, col: node.col },
+          typeDef, scope, exclude,
+        );
+      }
+    }
+
+    // Fallthrough — evaluate normally then apply standard type annotation checks
+    // (e.g., primitive/numeric, struct conformance for an already-built value).
+    return this.evalNode(node, scope, exclude);
+  }
+
+  /**
+   * §3.7 v0.10: Expand a variant shorthand into a UzonTaggedUnion using the
+   * tagged union's variant metadata. The inner expression is evaluated with
+   * the variant's inner type as context (enabling nested shorthands).
+   */
+  private expandVariantShorthand(
+    node: { variantName: string; inner: AstNode; line: number; col: number },
+    typeDef: { name: string; variants?: string[]; variantTypes?: Map<string, string> },
+    scope: Scope, exclude?: string,
+  ): UzonTaggedUnion {
+    const { variantName, inner } = node;
+    if (!typeDef.variants?.includes(variantName)) {
+      throw new UzonTypeError(
+        `'${variantName}' is not a variant of tagged union '${typeDef.name}'`,
+        node.line, node.col,
+      );
+    }
+    const innerTypeName = typeDef.variantTypes?.get(variantName) ?? null;
+    let innerVal: UzonValue;
+    if (innerTypeName === null) {
+      // Nullary variant — inner must be null literal or a bare identifier that resolves to null.
+      innerVal = this.evalNode(inner, scope, exclude);
+      if (innerVal !== null) {
+        throw new UzonTypeError(
+          `Variant '${variantName}' of tagged union '${typeDef.name}' is nullary — inner value must be null`,
+          node.line, node.col,
+        );
+      }
+    } else {
+      // Build a synthetic TypeExpr for the inner and eval with context
+      const innerTypeExpr: TypeExprNode = {
+        kind: "TypeExpr",
+        path: innerTypeName.split("."),
+        isList: false, inner: null, isNull: false,
+        isTuple: false, tupleElements: null,
+        line: node.line, col: node.col,
+      };
+      innerVal = this.evalInContext(inner, innerTypeExpr, scope, exclude);
+    }
+    const variantsMap = new Map<string, string | null>();
+    for (const v of typeDef.variants) {
+      variantsMap.set(v, typeDef.variantTypes?.get(v) ?? null);
+    }
+    return new UzonTaggedUnion(innerVal, variantName, variantsMap, typeDef.name);
+  }
+
+  /**
+   * §3.2 v0.10: Evaluate a struct literal with a declared struct type, applying
+   * field defaults for missing fields and evaluating explicit fields with each
+   * field's declared type as context. Returns the constructed struct object.
+   */
+  private evalStructLiteralInContext(
+    node: { kind: "StructLiteral"; fields: BindingNode[]; line: number; col: number },
+    typeDef: {
+      name: string;
+      templateValue?: Record<string, UzonValue>;
+      fieldTypeExprs?: Map<string, TypeExprNode>;
+    },
+    scope: Scope, _exclude?: string,
+  ): Record<string, UzonValue> {
+    const template = typeDef.templateValue ?? {};
+    const templateKeys = Object.keys(template);
+    const templateKeySet = new Set(templateKeys);
+
+    // Reject unknown fields upfront.
+    for (const f of node.fields) {
+      if (!templateKeySet.has(f.name)) {
+        throw new UzonTypeError(
+          `Extra field '${f.name}' not defined in type '${typeDef.name}'`,
+          f.line, f.col,
+        );
+      }
+    }
+
+    const childScope = new Scope(scope);
+    const result: Record<string, UzonValue> = {};
+    const seen = new Set<string>();
+
+    for (const f of node.fields) {
+      if (seen.has(f.name)) {
+        throw new UzonSyntaxError(
+          `Duplicate field '${f.name}' in struct literal`,
+          f.line, f.col,
+        );
+      }
+      seen.add(f.name);
+      const fieldTypeExpr = typeDef.fieldTypeExprs?.get(f.name);
+      let val: UzonValue;
+      if (fieldTypeExpr) {
+        val = this.evalInContext(f.value, fieldTypeExpr, childScope, f.name);
+      } else {
+        val = this.evalNode(f.value, childScope, f.name);
+      }
+      if (val !== UZON_UNDEFINED) {
+        childScope.set(f.name, val);
+        result[f.name] = val;
+      }
+    }
+
+    // Fill missing fields from template defaults (§3.2 v0.10).
+    for (const key of templateKeys) {
+      if (!(key in result)) {
+        result[key] = template[key];
+      }
+    }
+
+    this.structScopes.set(result, childScope);
+    this.structTypeNames.set(result, typeDef.name);
+    return result;
   }
 
   // ── Member access ──
@@ -1110,18 +1333,21 @@ export class Evaluator implements EvalContext {
         fields.set(k, typeTag(v));
       }
       const fieldAnnotations = new Map<string, string>();
+      const fieldTypeExprs = new Map<string, TypeExprNode>();
       if (valueNode.kind === "StructLiteral") {
         for (const field of (valueNode as StructLiteralNode).fields) {
           if (field.value.kind === "TypeAnnotation") {
             const typeNode = field.value.type;
             const typePath = typeNode.path.join(".");
             fieldAnnotations.set(field.name, typePath);
+            fieldTypeExprs.set(field.name, typeNode);
           }
         }
       }
       scope.setType(name, {
         kind: "struct", name, fields,
         ...(fieldAnnotations.size > 0 ? { fieldAnnotations } : {}),
+        ...(fieldTypeExprs.size > 0 ? { fieldTypeExprs } : {}),
         templateValue: val as Record<string, UzonValue>,
       });
     } else {

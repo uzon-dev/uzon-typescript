@@ -50,6 +50,7 @@ export function evalFunctionExpr(
 
   const paramNames = node.params.map(p => p.name);
   const paramTypes = node.params.map(p => typeExprToString(p.type));
+  const paramTypeExprs = node.params.map(p => p.type);
   const defaultValues: (UzonValue | null)[] = node.params.map(p =>
     p.defaultValue ? ctx.evalNode(p.defaultValue, scope, exclude) : null,
   );
@@ -57,7 +58,8 @@ export function evalFunctionExpr(
 
   return new UzonFunction(
     paramNames, paramTypes, defaultValues, returnType,
-    node.body, node.finalExpr, scope,
+    node.body, node.finalExpr, scope, null,
+    paramTypeExprs, node.returnType,
   );
 }
 
@@ -110,7 +112,10 @@ function callFunction(
   for (let i = 0; i < totalParams; i++) {
     let argVal: UzonValue;
     if (i < argNodes.length) {
-      argVal = ctx.evalNode(argNodes[i], callerScope, exclude);
+      const paramTypeExpr = fn.paramTypeExprs[i] as TypeExprNode | undefined;
+      argVal = paramTypeExpr
+        ? ctx.evalInContext(argNodes[i], paramTypeExpr, callerScope, exclude)
+        : ctx.evalNode(argNodes[i], callerScope, exclude);
       const argNumType = ctx.numericType;
       checkArgType(ctx, argVal, fn.paramTypes[i], fn.paramNames[i], argNodes[i], callerScope, argNumType);
     } else {
@@ -132,7 +137,10 @@ function callFunction(
     if (body.length > 0) {
       ctx.evaluateBindings(body, bodyScope, true, locals);
     }
-    const result = ctx.evalNode(fn.finalExpr as AstNode, bodyScope);
+    const returnTypeExpr = fn.returnTypeExpr as TypeExprNode | null;
+    const result = returnTypeExpr
+      ? ctx.evalInContext(fn.finalExpr as AstNode, returnTypeExpr, bodyScope)
+      : ctx.evalNode(fn.finalExpr as AstNode, bodyScope);
     checkReturnType(ctx, result, fn.returnType, node);
     return result;
   } finally {
@@ -179,7 +187,10 @@ export function callFunctionDirect(
   try {
     const body = fn.body as BindingNode[];
     if (body.length > 0) ctx.evaluateBindings(body, bodyScope, true, locals);
-    const result = ctx.evalNode(fn.finalExpr as AstNode, bodyScope);
+    const returnTypeExpr = fn.returnTypeExpr as TypeExprNode | null;
+    const result = returnTypeExpr
+      ? ctx.evalInContext(fn.finalExpr as AstNode, returnTypeExpr, bodyScope)
+      : ctx.evalNode(fn.finalExpr as AstNode, bodyScope);
     checkReturnType(ctx, result, fn.returnType, node);
     return result;
   } finally {

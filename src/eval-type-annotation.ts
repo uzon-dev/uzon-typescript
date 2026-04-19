@@ -26,18 +26,37 @@ export function evalTypeAnnotation(
   node: { kind: "TypeAnnotation"; expr: AstNode; type: TypeExprNode; line: number; col: number },
   scope: Scope, exclude?: string,
 ): UzonValue {
+  // §3.5/§3.7 v0.10: VariantShorthand and bare Identifier against a tagged
+  // union type — delegate to context-aware evaluator which expands the shorthand.
+  if (node.expr.kind === "VariantShorthand") {
+    return ctx.evalInContext(node.expr, node.type, scope, exclude);
+  }
+
   // Check for named enum type — resolve bare identifier as variant BEFORE evaluating
   if (node.expr.kind === "Identifier") {
-    const enumType = scope.getType(node.type.path);
-    if (enumType && enumType.kind === "enum") {
+    const ctxType = scope.getType(node.type.path);
+    if (ctxType && ctxType.kind === "enum") {
       const variantName = (node.expr as { name: string }).name;
-      if (enumType.variants?.includes(variantName)) {
-        return new UzonEnum(variantName, enumType.variants, enumType.name);
+      // Rule 4: bindings win
+      const name = variantName;
+      const bindingPresent = scope.has(name) && name !== exclude;
+      if (!bindingPresent && ctxType.variants?.includes(variantName)) {
+        return new UzonEnum(variantName, ctxType.variants, ctxType.name);
       }
-      throw new UzonTypeError(
-        `'${variantName}' is not a variant of enum type '${enumType.name}'`,
-        node.line, node.col,
-      );
+      if (!bindingPresent) {
+        throw new UzonTypeError(
+          `'${variantName}' is not a variant of enum type '${ctxType.name}'`,
+          node.line, node.col,
+        );
+      }
+    }
+    // §3.7 v0.10: bare identifier + tagged union type → nullary variant
+    if (ctxType && ctxType.kind === "tagged_union") {
+      const variantName = (node.expr as { name: string }).name;
+      const bindingPresent = scope.has(variantName) && variantName !== exclude;
+      if (!bindingPresent) {
+        return ctx.evalInContext(node.expr, node.type, scope, exclude);
+      }
     }
   }
 
@@ -59,6 +78,23 @@ export function evalTypeAnnotation(
       ctx.listElementTypes.set(elements, node.type.inner!.path.join("."));
       return elements;
     }
+  }
+
+  // §3.2 + §3.7 v0.10: StructLiteral/ListLiteral against a named type — use
+  // context-aware evaluator which fills struct defaults and recursively
+  // resolves variant shorthands in field values / list elements.
+  const outerTypeDef = scope.getType(node.type.path);
+  if (node.expr.kind === "StructLiteral" && outerTypeDef && outerTypeDef.kind === "struct") {
+    const built = ctx.evalInContext(node.expr, node.type, scope, exclude);
+    // Full conformance check still runs to validate types (incl. defaults).
+    return annotateAsStruct(
+      ctx, built,
+      outerTypeDef as { templateValue?: UzonValue; name: string; fieldAnnotations?: Map<string, string> },
+      node.type.path.join("."), node,
+    );
+  }
+  if (node.expr.kind === "ListLiteral" && node.type.isList && node.type.inner) {
+    return ctx.evalInContext(node.expr, node.type, scope, exclude);
   }
 
   const val = ctx.evalNode(node.expr, scope, exclude);
@@ -215,6 +251,7 @@ function annotateAsFunction(
     return new UzonFunction(
       val.paramNames, val.paramTypes, val.defaultValues,
       val.returnType, val.body, val.finalExpr, val.closureScope, typeDef.name,
+      val.paramTypeExprs, val.returnTypeExpr,
     );
   }
   return val;
