@@ -39,6 +39,19 @@ export function evalOrElse(
   node: { kind: "OrElse"; left: AstNode; right: AstNode; line: number; col: number },
   scope: Scope, exclude?: string,
 ): UzonValue {
+  // §4.5: literal `undefined` is not a value — reject in operand positions.
+  if (node.left.kind === "UndefinedLiteral") {
+    throw new UzonTypeError(
+      "literal 'undefined' is not a value — cannot be an 'or else' operand",
+      node.left.line, node.left.col,
+    );
+  }
+  if (node.right.kind === "UndefinedLiteral") {
+    throw new UzonTypeError(
+      "literal 'undefined' is not a value — cannot be an 'or else' operand",
+      node.right.line, node.right.col,
+    );
+  }
   const left = ctx.evalNode(node.left, scope, exclude);
   const leftNumType = ctx.numericType;
   if (left === UZON_UNDEFINED) {
@@ -68,17 +81,34 @@ export function evalIf(
   node: { kind: "IfExpr"; condition: AstNode; thenBranch: AstNode; elseBranch: AstNode; line: number; col: number },
   scope: Scope, exclude?: string,
 ): UzonValue {
+  // §4.5: literal `undefined` is not a value — reject in branch positions.
+  if (node.thenBranch.kind === "UndefinedLiteral") {
+    throw new UzonTypeError(
+      "literal 'undefined' is not a value — cannot be a 'then' branch result",
+      node.thenBranch.line, node.thenBranch.col,
+    );
+  }
+  if (node.elseBranch.kind === "UndefinedLiteral") {
+    throw new UzonTypeError(
+      "literal 'undefined' is not a value — cannot be an 'else' branch result",
+      node.elseBranch.line, node.elseBranch.col,
+    );
+  }
   const cond = unwrapValue(ctx.evalNode(node.condition, scope, exclude));
   assertBool(cond, node.condition);
   const taken = cond === true
     ? ctx.evalNode(node.thenBranch, scope, exclude)
     : ctx.evalNode(node.elseBranch, scope, exclude);
   const takenNumType = ctx.numericType;
+  // §5.9 R8: narrow the scope for the non-taken (speculative) branch so that
+  // type-dependent references to the scrutinee don't produce spurious errors.
+  const thenScope = narrowScopeForIfCondition(node.condition, scope, true);
+  const elseScope = narrowScopeForIfCondition(node.condition, scope, false);
   // §5.9: both branches must evaluate to the same type
   try {
     const other = cond === true
-      ? ctx.evalNode(node.elseBranch, scope, exclude)
-      : ctx.evalNode(node.thenBranch, scope, exclude);
+      ? ctx.evalNode(node.elseBranch, elseScope, exclude)
+      : ctx.evalNode(node.thenBranch, thenScope, exclude);
     if (taken !== null && other !== null
         && taken !== UZON_UNDEFINED && other !== UZON_UNDEFINED) {
       assertBranchTypeCompat(taken, takenNumType, other, ctx.numericType, node as AstNode);
@@ -93,6 +123,77 @@ export function evalIf(
   }
   ctx.numericType = takenNumType;
   return taken;
+}
+
+// §5.9 R8: narrow the scope for an if branch based on the condition.
+// Supports `x is type T`, `x is not type T`, `x is named V`, `x is not named V`.
+function narrowScopeForIfCondition(
+  cond: AstNode, scope: Scope, thenBranch: boolean,
+): Scope {
+  if (cond.kind !== "BinaryOp") return scope;
+  const bin = cond as { op: string; left: AstNode; right: AstNode };
+  if (bin.left.kind !== "Identifier") return scope;
+  const scrutineeName = (bin.left as { name: string }).name;
+
+  // Determine effective narrowing direction (positive = narrow TO the target type/variant)
+  let positive: boolean;
+  if (bin.op === "is type" || bin.op === "is named") positive = thenBranch;
+  else if (bin.op === "is not type" || bin.op === "is not named") positive = !thenBranch;
+  else return scope;
+
+  if (bin.op === "is type" || bin.op === "is not type") {
+    const typeNode = bin.right as { path?: string[]; isNull?: boolean };
+    const typeName = typeNode.isNull ? "null" : (typeNode.path?.join(".") ?? "");
+    if (!typeName) return scope;
+    if (positive) {
+      return createNarrowedScope(scope, scrutineeName, typeName);
+    }
+    // Negative narrowing for union/tagged-union with exactly one remaining member
+    const val = scope.has(scrutineeName) ? scope.get(scrutineeName) : undefined;
+    if (val instanceof UzonUnion && val.types.length > 0) {
+      const remaining = val.types.filter((t: string) => t !== typeName);
+      if (remaining.length === 1) {
+        return createNarrowedScope(scope, scrutineeName, remaining[0]);
+      }
+    }
+    return scope;
+  }
+
+  // is named / is not named
+  const variantName = (bin.right as { name: string }).name;
+  const val = scope.has(scrutineeName) ? scope.get(scrutineeName) : undefined;
+  if (!(val instanceof UzonTaggedUnion)) return scope;
+  let variants: ReadonlyMap<string, string | null> | undefined;
+  if (val.variants.size > 0) {
+    variants = val.variants;
+  } else if (val.typeName) {
+    const typeDef = scope.getType([val.typeName]);
+    if (typeDef && typeDef.variants) {
+      const m = new Map<string, string | null>();
+      for (const v of typeDef.variants) {
+        m.set(v, typeDef.variantTypes?.get(v) ?? null);
+      }
+      variants = m;
+    }
+  }
+  if (!variants) return scope;
+  if (positive) {
+    const innerType = variants.get(variantName);
+    if (innerType) return createNarrowedScope(scope, scrutineeName, innerType);
+    return scope;
+  }
+  // Negative: narrow only if exactly one remaining variant with a non-null inner type.
+  // Multiple remaining variants (or a remaining nullary variant) leave the value as
+  // a tagged union, so no primitive narrowing is possible.
+  const remainingEntries: [string, string | null][] = [];
+  for (const [tag, t] of variants) {
+    if (tag !== variantName) remainingEntries.push([tag, t]);
+  }
+  if (remainingEntries.length === 1) {
+    const innerType = remainingEntries[0][1];
+    if (innerType) return createNarrowedScope(scope, scrutineeName, innerType);
+  }
+  return scope;
 }
 
 // ── Case expression ──

@@ -178,6 +178,8 @@ function stdFilter(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude:
   }
   const elemType = ctx.listElementTypes.get(list);
   if (elemType) ctx.listElementTypes.set(result, elemType);
+  const typeName = ctx.listTypeNames.get(list);
+  if (typeName) ctx.listTypeNames.set(result, typeName);
   return result;
 }
 
@@ -203,6 +205,8 @@ function stdSort(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude: s
   const result = indexed.map(x => x.el);
   const elemType = ctx.listElementTypes.get(list);
   if (elemType) ctx.listElementTypes.set(result, elemType);
+  const typeName = ctx.listTypeNames.get(list);
+  if (typeName) ctx.listTypeNames.set(result, typeName);
   return result;
 }
 
@@ -327,6 +331,8 @@ function stdReverse(ctx: EvalContext, argNodes: AstNode[], scope: Scope, exclude
     const result = [...val].reverse();
     const elemType = ctx.listElementTypes.get(val);
     if (elemType) ctx.listElementTypes.set(result, elemType);
+    const typeName = ctx.listTypeNames.get(val);
+    if (typeName) ctx.listTypeNames.set(result, typeName);
     return result;
   }
   throw new UzonTypeError("std.reverse requires a list or string", node.line, node.col);

@@ -29,6 +29,7 @@ export interface EvalContext {
   // Mutable state
   numericType: string | null;
   listElementTypes: WeakMap<UzonValue[], string>;
+  listTypeNames: WeakMap<UzonValue[], string>;
   structTypeNames: WeakMap<Record<string, UzonValue>, string>;
   structScopes: WeakMap<Record<string, UzonValue>, Scope>;
   functionLocals: Map<string, UzonValue> | null;

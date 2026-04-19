@@ -15,7 +15,7 @@ import {
   type UzonValue,
 } from "./value.js";
 import { UzonTypeError } from "./error.js";
-import { validateIntegerType, validateFloatType } from "./eval-numeric.js";
+import { validateIntegerType, validateFloatType, isAdoptable } from "./eval-numeric.js";
 import type { EvalContext } from "./eval-context.js";
 import { typeTag, typeExprToString } from "./eval-helpers.js";
 
@@ -32,17 +32,17 @@ export function evalTypeAnnotation(
     return ctx.evalInContext(node.expr, node.type, scope, exclude);
   }
 
-  // Check for named enum type — resolve bare identifier as variant BEFORE evaluating
+  // §3.5 Rule 2: `as EnumType` — a bare identifier resolves as a variant
+  // of that enum type. Explicit `as` forces variant resolution, overriding
+  // Rule 4's binding-wins default.
   if (node.expr.kind === "Identifier") {
     const ctxType = scope.getType(node.type.path);
     if (ctxType && ctxType.kind === "enum") {
       const variantName = (node.expr as { name: string }).name;
-      // Rule 4: bindings win
-      const name = variantName;
-      const bindingPresent = scope.has(name) && name !== exclude;
-      if (!bindingPresent && ctxType.variants?.includes(variantName)) {
+      if (ctxType.variants?.includes(variantName)) {
         return new UzonEnum(variantName, ctxType.variants, ctxType.name);
       }
+      const bindingPresent = scope.has(variantName) && variantName !== exclude;
       if (!bindingPresent) {
         throw new UzonTypeError(
           `'${variantName}' is not a variant of enum type '${ctxType.name}'`,
@@ -52,11 +52,7 @@ export function evalTypeAnnotation(
     }
     // §3.7 v0.10: bare identifier + tagged union type → nullary variant
     if (ctxType && ctxType.kind === "tagged_union") {
-      const variantName = (node.expr as { name: string }).name;
-      const bindingPresent = scope.has(variantName) && variantName !== exclude;
-      if (!bindingPresent) {
-        return ctx.evalInContext(node.expr, node.type, scope, exclude);
-      }
+      return ctx.evalInContext(node.expr, node.type, scope, exclude);
     }
   }
 
@@ -94,7 +90,11 @@ export function evalTypeAnnotation(
     );
   }
   if (node.expr.kind === "ListLiteral" && node.type.isList && node.type.inner) {
-    return ctx.evalInContext(node.expr, node.type, scope, exclude);
+    const listVal = ctx.evalInContext(node.expr, node.type, scope, exclude);
+    if (Array.isArray(listVal)) {
+      return annotateListType(ctx, listVal, node.type.inner, scope, node as AstNode);
+    }
+    return listVal;
   }
 
   const val = ctx.evalNode(node.expr, scope, exclude);
@@ -103,6 +103,14 @@ export function evalTypeAnnotation(
   if (val === UZON_UNDEFINED) {
     validateTypeExists(node.type, scope, node as AstNode);
     return UZON_UNDEFINED;
+  }
+
+  // §6.1 (R6): `null as [T]` — null is not a list value; lists use `[] as [T]`.
+  if (node.type.isList && val === null) {
+    throw new UzonTypeError(
+      `Cannot annotate null as list type — lists use '[] as [${node.type.inner ? typeExprToString(node.type.inner) : "T"}]'`,
+      node.line, node.col,
+    );
   }
 
   // §3.4/§6.1: List type annotation
@@ -128,12 +136,36 @@ export function evalTypeAnnotation(
 
   // §6.3: as UnionType — value must match a member type
   if (typeDef && typeDef.kind === "union") {
-    return annotateAsUnion(val, typeDef, typeName, node);
+    return annotateAsUnion(ctx, val, typeDef, typeName, node);
   }
 
   // §6.3: Struct conformance check
   if (typeDef && typeDef.kind === "struct") {
     return annotateAsStruct(ctx, val, typeDef, typeName, node);
+  }
+
+  // §3.5 + §6.1: Enum annotation — value must already be a variant of this enum.
+  // Nominal types: cross-enum `as` is rejected even with identical variants.
+  if (typeDef && typeDef.kind === "enum") {
+    if (val instanceof UzonEnum) {
+      if (val.typeName && val.typeName !== typeDef.name) {
+        throw new UzonTypeError(
+          `Cannot annotate value of enum type '${val.typeName}' as different enum type '${typeName}'`,
+          node.line, node.col,
+        );
+      }
+      if (typeDef.variants?.includes(val.value)) {
+        return new UzonEnum(val.value, typeDef.variants, typeDef.name);
+      }
+      throw new UzonTypeError(
+        `'${val.value}' is not a variant of enum type '${typeName}'`,
+        node.line, node.col,
+      );
+    }
+    throw new UzonTypeError(
+      `Cannot annotate ${typeTag(val)} as enum type '${typeName}'`,
+      node.line, node.col,
+    );
   }
 
   // §3.8: Function type conformance
@@ -158,16 +190,33 @@ export function evalTypeAnnotation(
 // ── Union annotation ──
 
 function annotateAsUnion(
-  val: UzonValue, typeDef: { memberTypes?: string[]; name: string },
+  ctx: EvalContext, val: UzonValue, typeDef: { memberTypes?: string[]; name: string },
   typeName: string, node: { line: number; col: number },
 ): UzonUnion {
-  if (!typeDef.memberTypes || !typeDef.memberTypes.some(mt => valueMatchesMemberType(val, mt))) {
+  if (!typeDef.memberTypes) {
     throw new UzonTypeError(
       `Value of type ${typeTag(val)} does not match any member of union type '${typeName}'`,
       node.line, node.col,
     );
   }
-  return new UzonUnion(val, typeDef.memberTypes, typeDef.name);
+  // §6.3 (R7): exact-category match first
+  if (typeDef.memberTypes.some(mt => valueMatchesMemberType(val, mt))) {
+    return new UzonUnion(val, typeDef.memberTypes, typeDef.name);
+  }
+  // §6.3 (R7): untyped integer literal may promote to first float member
+  if (typeof val === "bigint" && (!ctx.numericType || isAdoptable(ctx.numericType))) {
+    const floatMember = typeDef.memberTypes.find(mt => /^f\d+$/.test(mt));
+    if (floatMember) {
+      const promoted = Number(val);
+      validateFloatType(promoted, floatMember, node as AstNode);
+      ctx.numericType = floatMember;
+      return new UzonUnion(promoted, typeDef.memberTypes, typeDef.name);
+    }
+  }
+  throw new UzonTypeError(
+    `Value of type ${typeTag(val)} does not match any member of union type '${typeName}'`,
+    node.line, node.col,
+  );
 }
 
 // ── Struct annotation ──
@@ -523,12 +572,47 @@ function checkStructConformance(
 // ── Helpers ──
 
 function valueMatchesMemberType(val: UzonValue, memberType: string): boolean {
-  if (val === null) return false;
+  if (val === null) return memberType === "null";
   if (typeof val === "bigint") return /^[iu]\d+$/.test(memberType);
   if (typeof val === "number") return /^f\d+$/.test(memberType);
   if (typeof val === "boolean") return memberType === "bool";
   if (typeof val === "string") return memberType === "string";
+  if (val instanceof UzonTuple) {
+    if (!memberType.startsWith("(") || !memberType.endsWith(")")) return false;
+    const elemTypes = splitTypeList(memberType.slice(1, -1));
+    if (elemTypes.length !== val.length) return false;
+    for (let i = 0; i < elemTypes.length; i++) {
+      if (!valueMatchesMemberType(val.elements[i], elemTypes[i])) return false;
+    }
+    return true;
+  }
+  if (Array.isArray(val)) {
+    if (!memberType.startsWith("[") || !memberType.endsWith("]")) return false;
+    const elemType = memberType.slice(1, -1);
+    for (const elem of val) {
+      if (!valueMatchesMemberType(elem, elemType)) return false;
+    }
+    return true;
+  }
   return false;
+}
+
+// Split a comma-separated type list, respecting nested brackets/parens.
+function splitTypeList(s: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === "(" || c === "[") depth++;
+    else if (c === ")" || c === "]") depth--;
+    else if (c === "," && depth === 0) {
+      out.push(s.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  out.push(s.slice(start).trim());
+  return out;
 }
 
 export function validateTypeExists(type: TypeExprNode, scope: Scope, node: AstNode): void {

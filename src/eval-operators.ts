@@ -290,6 +290,12 @@ function evalIsTypeOp(
     );
   }
 
+  // Named list type check — succeeds only when the list carries this type name
+  if (Array.isArray(left) && scope.getType(typeNode.path ?? [])?.kind === "list") {
+    const listName = ctx.listTypeNames.get(left);
+    const matches = listName === typeName;
+    return node.op === "is type" ? matches : !matches;
+  }
   const matches = valueMatchesType(left, typeName, leftNumType);
   return node.op === "is type" ? matches : !matches;
 }

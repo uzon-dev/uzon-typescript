@@ -75,6 +75,8 @@ export interface EvalOptions {
   structScopes?: WeakMap<Record<string, UzonValue>, Scope>;
   /** Shared across imports: list → element type */
   listElementTypes?: WeakMap<UzonValue[], string>;
+  /** Shared across imports: list → named list type */
+  listTypeNames?: WeakMap<UzonValue[], string>;
 }
 
 // ── Evaluator ────────────────────────────────────────────────────
@@ -92,6 +94,7 @@ export class Evaluator implements EvalContext {
   structScopes!: WeakMap<Record<string, UzonValue>, Scope>;
   structTypeNames!: WeakMap<Record<string, UzonValue>, string>;
   listElementTypes!: WeakMap<UzonValue[], string>;
+  listTypeNames!: WeakMap<UzonValue[], string>;
   private tupleElementTypes = new WeakMap<UzonTuple, (string | null)[]>();
   /** Active function-local bindings for bare identifier resolution (§3.8) */
   functionLocals: Map<string, UzonValue> | null = null;
@@ -116,6 +119,7 @@ export class Evaluator implements EvalContext {
     this.structTypeNames = options.structTypeNames ?? new WeakMap();
     this.structScopes = options.structScopes ?? new WeakMap();
     this.listElementTypes = options.listElementTypes ?? new WeakMap();
+    this.listTypeNames = options.listTypeNames ?? new WeakMap();
   }
 
   // ── Public API ──
@@ -294,6 +298,9 @@ export class Evaluator implements EvalContext {
     if (val !== null && typeof val === "object" && !Array.isArray(val)
         && !(val instanceof UzonTuple)) {
       this.structTypeNames.set(val as Record<string, UzonValue>, calledName);
+    }
+    if (Array.isArray(val)) {
+      this.listTypeNames.set(val, calledName);
     }
     return val;
   }
@@ -725,6 +732,13 @@ export class Evaluator implements EvalContext {
     // §3.6: untagged unions are transparent for member access
     if (obj instanceof UzonUnion) {
       return this.accessMember(obj.value, member, node);
+    }
+    // §5.12 (R4): functions have no fields.
+    if (obj instanceof UzonFunction) {
+      throw new UzonTypeError(
+        `Cannot access member '${member}' on a function value — functions have no fields`,
+        node.line, node.col,
+      );
     }
     // Struct field
     if (typeof obj === "object" && !Array.isArray(obj)

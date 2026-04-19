@@ -42,6 +42,14 @@ export function evalFunctionExpr(
     }
   }
 
+  // §4.5: literal `undefined` cannot be the function body's final (return) expression.
+  if (node.finalExpr.kind === "UndefinedLiteral") {
+    throw new UzonTypeError(
+      "literal 'undefined' is not a value — cannot be a function's return expression",
+      node.finalExpr.line, node.finalExpr.col,
+    );
+  }
+
   // §6.2: Validate parameter and return types exist in scope at definition time
   for (const p of node.params) {
     validateTypeExists(p.type, scope, node as AstNode);
