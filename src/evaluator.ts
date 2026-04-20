@@ -799,7 +799,7 @@ export class Evaluator implements EvalContext {
     scope: Scope, exclude?: string,
   ): UzonValue {
     if (node.variants.length < 2) {
-      throw new UzonTypeError("An enum must have at least two variants", node.line, node.col);
+      throw new UzonSyntaxError("An enum must have at least two variants", node.line, node.col);
     }
     // §3.5/§9: duplicate variant names are a type error.
     const seen = new Set<string>();
@@ -914,7 +914,7 @@ export class Evaluator implements EvalContext {
     scope: Scope,
   ): UzonValue {
     if (node.types.length < 2) {
-      throw new UzonTypeError("A union must have at least two member types", node.line, node.col);
+      throw new UzonSyntaxError("A union must have at least two member types", node.line, node.col);
     }
     // §3.6: duplicate member types in union are a type error.
     const seen = new Set<string>();
@@ -955,7 +955,7 @@ export class Evaluator implements EvalContext {
     scope: Scope,
   ): UzonValue {
     if (node.variants.length < 2) {
-      throw new UzonTypeError("A tagged union must have at least two variants", node.line, node.col);
+      throw new UzonSyntaxError("A tagged union must have at least two variants", node.line, node.col);
     }
     // §3.7: duplicate variant names are a type error.
     const seen = new Set<string>();
@@ -992,7 +992,7 @@ export class Evaluator implements EvalContext {
     scope: Scope, exclude?: string,
   ): UzonValue {
     if (node.types.length < 2) {
-      throw new UzonTypeError("A union must have at least two member types", node.line, node.col);
+      throw new UzonSyntaxError("A union must have at least two member types", node.line, node.col);
     }
     // §3.6: duplicate member types in union are a type error.
     const seenTypes = new Set<string>();
@@ -1033,7 +1033,7 @@ export class Evaluator implements EvalContext {
     let typeName: string | null = null;
     if (node.variants) {
       if (node.variants.length < 2) {
-        throw new UzonTypeError("A tagged union must have at least two variants", node.line, node.col);
+        throw new UzonSyntaxError("A tagged union must have at least two variants", node.line, node.col);
       }
       // §3.5/§9: duplicate variant names are a type error.
       const seenNames = new Set<string>();
