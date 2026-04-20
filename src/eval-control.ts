@@ -23,13 +23,14 @@ import { assertSameType, valuesEqual, unwrapValue, assertBool } from "./eval-hel
 /** §5: assertSameType with int→float cross-category adoption awareness.
  *  An adoptable integer literal may unify with a float value in branch contexts. */
 function assertBranchTypeCompat(
+  ctx: EvalContext,
   a: UzonValue, aNumType: string | null,
   b: UzonValue, bNumType: string | null,
   node: AstNode,
 ): void {
   if (typeof a === "bigint" && typeof b === "number" && isAdoptable(aNumType)) return;
   if (typeof b === "bigint" && typeof a === "number" && isAdoptable(bNumType)) return;
-  assertSameType(a, b, node);
+  assertSameType(a, b, node, ctx.structTypeNames);
 }
 
 // ── Or else ──
@@ -65,7 +66,7 @@ export function evalOrElse(
   try {
     const right = ctx.resolveEnumVariantOrEval(node.right, left, scope, exclude);
     if (right !== UZON_UNDEFINED && right !== null && left !== null) {
-      assertBranchTypeCompat(left, leftNumType, right, ctx.numericType, node as AstNode);
+      assertBranchTypeCompat(ctx, left, leftNumType, right, ctx.numericType, node as AstNode);
     }
   } catch (e) {
     if (e instanceof UzonTypeError) throw e;
@@ -111,7 +112,7 @@ export function evalIf(
       : ctx.evalNode(node.thenBranch, thenScope, exclude);
     if (taken !== null && other !== null
         && taken !== UZON_UNDEFINED && other !== UZON_UNDEFINED) {
-      assertBranchTypeCompat(taken, takenNumType, other, ctx.numericType, node as AstNode);
+      assertBranchTypeCompat(ctx, taken, takenNumType, other, ctx.numericType, node as AstNode);
     }
     // §3.4: empty list type inference from other branch
     if (Array.isArray(taken) && taken.length === 0 && Array.isArray(other) && other.length > 0) {
@@ -266,7 +267,7 @@ export function evalCase(
         wcNode.line, wcNode.col,
       );
     }
-    assertBranchTypeCompat(scrutinee, scrutineeNumType, whenVal, ctx.numericType, wcNode);
+    assertBranchTypeCompat(ctx, scrutinee, scrutineeNumType, whenVal, ctx.numericType, wcNode);
     if (takenResult === undefined && valuesEqual(scrutinee, whenVal)) {
       takenResult = ctx.evalNode(wc.result, scope, exclude);
       takenNumType = ctx.numericType;
@@ -425,7 +426,7 @@ function assertBranchTypesNarrowed(
     }
     if (result !== null && branchResult !== null
         && result !== UZON_UNDEFINED && branchResult !== UZON_UNDEFINED) {
-      assertBranchTypeCompat(result, resultNumType, branchResult, ctx.numericType, node as unknown as AstNode);
+      assertBranchTypeCompat(ctx, result, resultNumType, branchResult, ctx.numericType, node as unknown as AstNode);
     }
   }
   if (hasTaken) {
@@ -442,7 +443,7 @@ function assertBranchTypesNarrowed(
     }
     if (result !== null && elseResult !== null
         && result !== UZON_UNDEFINED && elseResult !== UZON_UNDEFINED) {
-      assertBranchTypeCompat(result, resultNumType, elseResult, ctx.numericType, node as unknown as AstNode);
+      assertBranchTypeCompat(ctx, result, resultNumType, elseResult, ctx.numericType, node as unknown as AstNode);
     }
   }
 }
@@ -508,7 +509,7 @@ function assertBranchTypes(
       const branchResult = ctx.evalNode(wc.result, scope, exclude);
       if (result !== null && branchResult !== null
           && result !== UZON_UNDEFINED && branchResult !== UZON_UNDEFINED) {
-        assertBranchTypeCompat(result, resultNumType, branchResult, ctx.numericType, node as unknown as AstNode);
+        assertBranchTypeCompat(ctx, result, resultNumType, branchResult, ctx.numericType, node as unknown as AstNode);
       }
       if (Array.isArray(result) && result.length === 0 && Array.isArray(branchResult) && branchResult.length > 0) {
         const otherElemType = ctx.listElementTypes.get(branchResult);
@@ -523,7 +524,7 @@ function assertBranchTypes(
       const elseResult = ctx.evalNode(node.elseBranch, scope, exclude);
       if (result !== null && elseResult !== null
           && result !== UZON_UNDEFINED && elseResult !== UZON_UNDEFINED) {
-        assertBranchTypeCompat(result, resultNumType, elseResult, ctx.numericType, node as unknown as AstNode);
+        assertBranchTypeCompat(ctx, result, resultNumType, elseResult, ctx.numericType, node as unknown as AstNode);
       }
       if (Array.isArray(result) && result.length === 0 && Array.isArray(elseResult) && elseResult.length > 0) {
         const otherElemType = ctx.listElementTypes.get(elseResult);

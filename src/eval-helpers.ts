@@ -9,6 +9,7 @@
  */
 
 import type { AstNode, TypeExprNode } from "./ast.js";
+import type { TypeDef } from "./scope.js";
 import {
   UZON_UNDEFINED, UzonEnum, UzonUnion, UzonTaggedUnion, UzonTuple, UzonFunction,
   formatUzonFloat,
@@ -81,7 +82,10 @@ export function assertBool(val: UzonValue, node: AstNode): asserts val is boolea
   }
 }
 
-export function assertSameType(a: UzonValue, b: UzonValue, node: AstNode): void {
+export function assertSameType(
+  a: UzonValue, b: UzonValue, node: AstNode,
+  structTypeNames?: WeakMap<Record<string, UzonValue>, TypeDef>,
+): void {
   if (a === null || b === null) return;
   if (a === UZON_UNDEFINED || b === UZON_UNDEFINED) return;
   if (a instanceof UzonFunction || b instanceof UzonFunction) {
@@ -99,17 +103,32 @@ export function assertSameType(a: UzonValue, b: UzonValue, node: AstNode): void 
     );
   }
   if (ta === "struct") {
-    const aKeys = Object.keys(a as Record<string, UzonValue>).sort();
-    const bKeys = Object.keys(b as Record<string, UzonValue>).sort();
+    const aObj = a as Record<string, UzonValue>;
+    const bObj = b as Record<string, UzonValue>;
+    // §7.3: nominal struct types are identified by declaring-scope reference.
+    // Two structs with identical shape but distinct declarations are not the
+    // same type — comparison is a type error.
+    if (structTypeNames) {
+      const aTypeDef = structTypeNames.get(aObj) ?? null;
+      const bTypeDef = structTypeNames.get(bObj) ?? null;
+      if (aTypeDef !== bTypeDef) {
+        const aDesc = aTypeDef?.name ?? "anonymous struct";
+        const bDesc = bTypeDef?.name ?? "anonymous struct";
+        throw new UzonTypeError(
+          `Cannot compare struct of type '${aDesc}' with '${bDesc}' — distinct nominal types`,
+          node.line, node.col,
+        );
+      }
+    }
+    const aKeys = Object.keys(aObj).sort();
+    const bKeys = Object.keys(bObj).sort();
     if (aKeys.length !== bKeys.length || aKeys.some((k, i) => k !== bKeys[i])) {
       throw new UzonTypeError(
         `Cannot compare structs with different fields — {${aKeys.join(", ")}} vs {${bKeys.join(", ")}}`,
         node.line, node.col,
       );
     }
-    const aObj = a as Record<string, UzonValue>;
-    const bObj = b as Record<string, UzonValue>;
-    for (const k of aKeys) assertSameType(aObj[k], bObj[k], node);
+    for (const k of aKeys) assertSameType(aObj[k], bObj[k], node, structTypeNames);
   }
   if (ta === "list") {
     const aCat = listElementCategory(a as UzonValue[]);
@@ -131,7 +150,7 @@ export function assertSameType(a: UzonValue, b: UzonValue, node: AstNode): void 
       );
     }
     for (let i = 0; i < aTup.elements.length; i++) {
-      assertSameType(aTup.elements[i], bTup.elements[i], node);
+      assertSameType(aTup.elements[i], bTup.elements[i], node, structTypeNames);
     }
   }
 }

@@ -185,7 +185,7 @@ function evalIsOperands(
     left = left.value;
     right = right.value;
     try {
-      assertSameType(left, right, node as AstNode);
+      assertSameType(left, right, node as AstNode, ctx.structTypeNames);
     } catch (e) {
       // §3.8: function comparison is always a type error, even inside unions
       if (left instanceof UzonFunction || right instanceof UzonFunction) throw e;
@@ -205,7 +205,7 @@ function evalIsOperands(
     right = Number(right);
   }
 
-  assertSameType(left, right, node as AstNode);
+  assertSameType(left, right, node as AstNode, ctx.structTypeNames);
   return [left, right];
 }
 
