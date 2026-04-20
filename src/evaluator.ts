@@ -69,8 +69,8 @@ export interface EvalOptions {
   importCache?: Map<string, Record<string, UzonValue>>;
   scopeCache?: Map<string, Scope>;
   importStack?: string[];
-  /** Shared across imports: struct → type name */
-  structTypeNames?: WeakMap<Record<string, UzonValue>, string>;
+  /** Shared across imports: struct → declaring TypeDef (reference identity) */
+  structTypeNames?: WeakMap<Record<string, UzonValue>, TypeDef>;
   /** Shared across imports: struct → scope */
   structScopes?: WeakMap<Record<string, UzonValue>, Scope>;
   /** Shared across imports: list → element type */
@@ -92,7 +92,7 @@ export class Evaluator implements EvalContext {
   /** Collected errors for multi-error reporting (circular deps, import cycles). */
   collectedErrors: UzonError[] = [];
   structScopes!: WeakMap<Record<string, UzonValue>, Scope>;
-  structTypeNames!: WeakMap<Record<string, UzonValue>, string>;
+  structTypeNames!: WeakMap<Record<string, UzonValue>, TypeDef>;
   listElementTypes!: WeakMap<UzonValue[], string>;
   listTypeNames!: WeakMap<UzonValue[], string>;
   private tupleElementTypes = new WeakMap<UzonTuple, (string | null)[]>();
@@ -295,10 +295,9 @@ export class Evaluator implements EvalContext {
         val.paramTypeExprs, val.returnTypeExpr,
       );
     }
-    if (val !== null && typeof val === "object" && !Array.isArray(val)
-        && !(val instanceof UzonTuple)) {
-      this.structTypeNames.set(val as Record<string, UzonValue>, calledName);
-    }
+    // Note: struct type-name attachment happens after registerType runs,
+    // so the TypeDef reference (not just the name) can be stored in
+    // structTypeNames for cross-file nominal identity (§7.3).
     if (Array.isArray(val)) {
       this.listTypeNames.set(val, calledName);
     }
@@ -455,7 +454,7 @@ export class Evaluator implements EvalContext {
 
   // ── Identifier resolution ──
 
-  private resolveIdentifier(name: string, node: AstNode, scope?: Scope, exclude?: string): UzonValue {
+  private resolveIdentifier(name: string, _node: AstNode, scope?: Scope, exclude?: string): UzonValue {
     // §3.8: Inside function bodies, parameters and body bindings are bare identifiers
     if (this.functionLocals?.has(name)) {
       return this.functionLocals.get(name)!;
@@ -650,11 +649,7 @@ export class Evaluator implements EvalContext {
    */
   private evalStructLiteralInContext(
     node: { kind: "StructLiteral"; fields: BindingNode[]; line: number; col: number },
-    typeDef: {
-      name: string;
-      templateValue?: Record<string, UzonValue>;
-      fieldTypeExprs?: Map<string, TypeExprNode>;
-    },
+    typeDef: TypeDef,
     scope: Scope, _exclude?: string,
   ): Record<string, UzonValue> {
     const template = typeDef.templateValue ?? {};
@@ -704,7 +699,7 @@ export class Evaluator implements EvalContext {
     }
 
     this.structScopes.set(result, childScope);
-    this.structTypeNames.set(result, typeDef.name);
+    this.structTypeNames.set(result, typeDef);
     return result;
   }
 
@@ -1059,6 +1054,16 @@ export class Evaluator implements EvalContext {
             node.line, node.col,
           );
         }
+        // §6.1: null as TU named variant requires the variant's inner type to be null
+        if (val === null) {
+          const variantInner = variants.get(node.tag);
+          if (variantInner !== null && variantInner !== "null") {
+            throw new UzonTypeError(
+              `Cannot use null as '${typeName}' named '${node.tag}' — variant '${node.tag}' has inner type '${variantInner}', not null`,
+              node.line, node.col,
+            );
+          }
+        }
       }
     }
     return new UzonTaggedUnion(val, node.tag, variants, typeName);
@@ -1225,18 +1230,18 @@ export class Evaluator implements EvalContext {
     if (refStruct === null) return;
 
     const refKeys = Object.keys(refStruct);
-    const refTypeName = this.structTypeNames.get(refStruct) ?? null;
+    const refTypeDef = this.structTypeNames.get(refStruct) ?? null;
 
     for (let i = refIdx + 1; i < result.length; i++) {
       if (result[i] === null) continue;
       const elem = result[i] as Record<string, UzonValue>;
       const elemKeys = Object.keys(elem);
 
-      // Check named type compatibility (§3.2.1 rule 5)
-      const elemTypeName = this.structTypeNames.get(elem) ?? null;
-      if (refTypeName !== elemTypeName) {
-        const refDesc = refTypeName ?? "anonymous struct";
-        const elemDesc = elemTypeName ?? "anonymous struct";
+      // Check named type compatibility (§3.2.1 rule 5, §7.3 identity by ref)
+      const elemTypeDef = this.structTypeNames.get(elem) ?? null;
+      if (refTypeDef !== elemTypeDef) {
+        const refDesc = refTypeDef?.name ?? "anonymous struct";
+        const elemDesc = elemTypeDef?.name ?? "anonymous struct";
         throw new UzonTypeError(
           `List element ${i} is ${elemDesc} but expected ${refDesc} — all struct elements must have the same type`,
           node.elements[i].line, node.elements[i].col,
@@ -1436,12 +1441,14 @@ export class Evaluator implements EvalContext {
           }
         }
       }
-      scope.setType(name, {
+      const typeDef: TypeDef = {
         kind: "struct", name, fields,
         ...(fieldAnnotations.size > 0 ? { fieldAnnotations } : {}),
         ...(fieldTypeExprs.size > 0 ? { fieldTypeExprs } : {}),
         templateValue: val as Record<string, UzonValue>,
-      });
+      };
+      scope.setType(name, typeDef);
+      this.structTypeNames.set(val as Record<string, UzonValue>, typeDef);
     } else {
       // Primitives and null — register as a primitive type
       const baseType = val === null ? "null"

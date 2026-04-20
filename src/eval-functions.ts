@@ -272,10 +272,10 @@ function checkArgType(
           || val instanceof UzonFunction) {
         throw new UzonTypeError(`Argument '${paramName}' expected ${expectedType} but got ${typeTag(val)}`, node.line, node.col);
       }
-      const valTypeName = ctx.structTypeNames.get(val as Record<string, UzonValue>);
-      if (valTypeName !== typeDef.name) {
+      const valTypeDef = ctx.structTypeNames.get(val as Record<string, UzonValue>);
+      if (valTypeDef !== typeDef) {
         throw new UzonTypeError(
-          `Argument '${paramName}' expected struct '${expectedType}' but got struct '${valTypeName ?? "(anonymous)"}'`,
+          `Argument '${paramName}' expected struct '${expectedType}' but got struct '${valTypeDef?.name ?? "(anonymous)"}'`,
           node.line, node.col,
         );
       }
@@ -362,10 +362,10 @@ function checkReturnType(ctx: EvalContext, result: UzonValue, returnType: string
       && !(result instanceof UzonEnum) && !(result instanceof UzonUnion)
       && !(result instanceof UzonTaggedUnion) && !(result instanceof UzonTuple)
       && !(result instanceof UzonFunction)) {
-    const resultTypeName = ctx.structTypeNames.get(result as Record<string, UzonValue>);
-    if (resultTypeName && resultTypeName !== returnType) {
+    const resultTypeDef = ctx.structTypeNames.get(result as Record<string, UzonValue>);
+    if (resultTypeDef && resultTypeDef.name !== returnType) {
       throw new UzonTypeError(
-        `Function return type is '${returnType}' but body evaluated to struct '${resultTypeName}'`,
+        `Function return type is '${returnType}' but body evaluated to struct '${resultTypeDef.name}'`,
         node.line, node.col,
       );
     }

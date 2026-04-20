@@ -42,16 +42,20 @@ function parseAndEvalWithMeta(src: string, filename?: string) {
   return { bindings, listElementTypes: evaluator.listElementTypes };
 }
 
-/** Recursively collect all .uzon files under a directory. */
+/** Recursively collect all .uzon files under a directory.
+ *  Convention: when a directory contains `entry.uzon`, only that file is
+ *  collected — its siblings are treated as imported modules. */
 function collectUzonFilesRecursive(dir: string): string[] {
   const results: string[] = [];
   let entries: string[];
   try { entries = readdirSync(dir); } catch { return []; }
+  const hasEntry = entries.includes("entry.uzon");
   for (const entry of entries) {
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) {
       results.push(...collectUzonFilesRecursive(full));
     } else if (entry.endsWith(".uzon")) {
+      if (hasEntry && entry !== "entry.uzon") continue;
       results.push(full);
     }
   }
@@ -83,7 +87,7 @@ describe("conformance: invalid", () => {
     const label = relative(invalidDir, filePath);
     it(label, () => {
       const src = readFileSync(filePath, "utf-8");
-      expect(() => parseAndEval(src)).toThrow();
+      expect(() => parseAndEval(src, filePath)).toThrow();
     });
   }
 });

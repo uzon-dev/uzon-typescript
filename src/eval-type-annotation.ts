@@ -9,7 +9,7 @@
  */
 
 import type { AstNode, TypeExprNode } from "./ast.js";
-import type { Scope } from "./scope.js";
+import type { Scope, TypeDef } from "./scope.js";
 import {
   UZON_UNDEFINED, UzonEnum, UzonUnion, UzonTaggedUnion, UzonTuple, UzonFunction,
   type UzonValue,
@@ -84,8 +84,7 @@ export function evalTypeAnnotation(
     const built = ctx.evalInContext(node.expr, node.type, scope, exclude);
     // Full conformance check still runs to validate types (incl. defaults).
     return annotateAsStruct(
-      ctx, built,
-      outerTypeDef as { templateValue?: UzonValue; name: string; fieldAnnotations?: Map<string, string> },
+      ctx, built, outerTypeDef,
       node.type.path.join("."), node,
     );
   }
@@ -223,7 +222,7 @@ function annotateAsUnion(
 
 function annotateAsStruct(
   ctx: EvalContext, val: UzonValue,
-  typeDef: { templateValue?: UzonValue; name: string; fieldAnnotations?: Map<string, string> },
+  typeDef: TypeDef,
   typeName: string, node: { line: number; col: number },
 ): UzonValue {
   if (typeof val !== "object" || val === null || Array.isArray(val)
@@ -235,12 +234,14 @@ function annotateAsStruct(
       node.line, node.col,
     );
   }
-  // §3.2.1/§6.1: nominal struct types — a value already named as one
+  // §3.2.1/§6.1/§7.3: nominal struct types — a value already named as one
   // named struct type cannot be re-annotated as a different named type.
-  const existingName = ctx.structTypeNames.get(val as Record<string, UzonValue>);
-  if (existingName && existingName !== typeDef.name) {
+  // Identity is by TypeDef reference, not name (two files may declare
+  // types with the same name but they are distinct per §7.3).
+  const existingTypeDef = ctx.structTypeNames.get(val as Record<string, UzonValue>);
+  if (existingTypeDef && existingTypeDef !== typeDef) {
     throw new UzonTypeError(
-      `Cannot annotate value of named struct type '${existingName}' as different named struct type '${typeName}'`,
+      `Cannot annotate value of named struct type '${existingTypeDef.name}' as different named struct type '${typeName}'`,
       node.line, node.col,
     );
   }
@@ -252,8 +253,8 @@ function annotateAsStruct(
       typeName, node as AstNode, typeDef.fieldAnnotations,
     );
   }
-  if (!existingName) {
-    ctx.structTypeNames.set(val as Record<string, UzonValue>, typeDef.name);
+  if (!existingTypeDef) {
+    ctx.structTypeNames.set(val as Record<string, UzonValue>, typeDef);
   }
   return val;
 }

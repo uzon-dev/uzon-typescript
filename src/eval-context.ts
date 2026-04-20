@@ -10,7 +10,7 @@
  */
 
 import type { AstNode, BindingNode, TypeExprNode } from "./ast.js";
-import type { Scope } from "./scope.js";
+import type { Scope, TypeDef } from "./scope.js";
 import type { UzonValue, UzonFunction } from "./value.js";
 
 export interface EvalContext {
@@ -30,7 +30,7 @@ export interface EvalContext {
   numericType: string | null;
   listElementTypes: WeakMap<UzonValue[], string>;
   listTypeNames: WeakMap<UzonValue[], string>;
-  structTypeNames: WeakMap<Record<string, UzonValue>, string>;
+  structTypeNames: WeakMap<Record<string, UzonValue>, TypeDef>;
   structScopes: WeakMap<Record<string, UzonValue>, Scope>;
   functionLocals: Map<string, UzonValue> | null;
   callStack: Set<UzonFunction>;
