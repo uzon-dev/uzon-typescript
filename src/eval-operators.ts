@@ -264,7 +264,7 @@ function evalIsNamed(
 const BUILTIN_TYPES = new Set([
   "null", "bool", "string",
   "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64",
-  "f32", "f64",
+  "f16", "f32", "f64", "f80", "f128",
 ]);
 
 function evalIsTypeOp(
@@ -505,7 +505,14 @@ function evalArithmetic(
       case "*": result = lVal * rVal; break;
       case "/": result = lVal / rVal; break;
       case "%": result = lVal % rVal; break;
-      case "^": result = Math.pow(lVal, rVal); break;
+      case "^":
+        if (lVal < 0 && !Number.isInteger(rVal)) {
+          throw new UzonRuntimeError(
+            "Negative base with non-integer exponent would produce a complex number",
+            node.line, node.col,
+          );
+        }
+        result = Math.pow(lVal, rVal); break;
     }
   } else if (typeof lVal === "bigint" && typeof rVal === "number") {
     throw new UzonTypeError("Cannot mix integer and float in arithmetic — use 'to' to convert", node.line, node.col);

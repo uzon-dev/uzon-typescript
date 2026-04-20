@@ -470,7 +470,7 @@ function defaultForType(typeName: string): UzonValue | undefined {
 const BUILTIN_TYPE_NAMES = new Set([
   "null", "bool", "string",
   "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64",
-  "f32", "f64",
+  "f16", "f32", "f64", "f80", "f128",
 ]);
 
 function isValidTypeName(typeName: string, scope: Scope): boolean {

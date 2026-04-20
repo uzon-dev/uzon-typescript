@@ -25,7 +25,7 @@ import {
   UZON_UNDEFINED, UzonEnum, UzonUnion, UzonTaggedUnion, UzonTuple, UzonFunction,
   type UzonValue,
 } from "./value.js";
-import { Scope } from "./scope.js";
+import { Scope, type TypeDef } from "./scope.js";
 import {
   UzonError, UzonRuntimeError, UzonTypeError, UzonCircularError, UzonSyntaxError,
 } from "./error.js";
@@ -1374,6 +1374,35 @@ export class Evaluator implements EvalContext {
         : "unknown";
       scope.setType(name, { kind: "primitive", name, elementType: baseType });
     }
+    this.checkTypeRecursion(name, scope, valueNode.line, valueNode.col);
+  }
+
+  // §6.4: Recursive type definitions are forbidden.
+  private checkTypeRecursion(name: string, scope: Scope, line: number, col: number): void {
+    const visited = new Set<string>();
+    const visit = (typeName: string, chain: string[]): void => {
+      if (typeName === name) {
+        const detail = chain.length === 0
+          ? "references itself directly"
+          : `references itself through ${[name, ...chain, name].join(" → ")}`;
+        throw new UzonTypeError(
+          `Recursive type definition: '${name}' ${detail}`,
+          line, col,
+        );
+      }
+      if (visited.has(typeName)) return;
+      visited.add(typeName);
+      const def = scope.getType([typeName]);
+      if (!def) return;
+      for (const ref of extractTypeRefs(def)) {
+        visit(ref, [...chain, typeName]);
+      }
+    };
+    const def = scope.getType([name]);
+    if (!def) return;
+    for (const ref of extractTypeRefs(def)) {
+      visit(ref, []);
+    }
   }
 
   private getImportScope(val: Record<string, UzonValue>): Scope | undefined {
@@ -1390,4 +1419,66 @@ export class Evaluator implements EvalContext {
     }
     return undefined;
   }
+}
+
+// ── Type reference extraction (§6.4 recursion check) ──
+
+function isPrimitiveTypeName(t: string): boolean {
+  return /^[iu]\d+$/.test(t) || /^f\d+$/.test(t)
+    || t === "bool" || t === "string" || t === "null";
+}
+
+function collectNamesFromTypeString(typeStr: string, out: string[]): void {
+  const s = typeStr.trim();
+  if (!s) return;
+  if (s.startsWith("[") && s.endsWith("]")) {
+    collectNamesFromTypeString(s.slice(1, -1), out);
+    return;
+  }
+  if (s.startsWith("(") && s.endsWith(")")) {
+    const inner = s.slice(1, -1);
+    let depth = 0, start = 0;
+    for (let i = 0; i < inner.length; i++) {
+      const c = inner[i];
+      if (c === "[" || c === "(") depth++;
+      else if (c === "]" || c === ")") depth--;
+      else if (c === "," && depth === 0) {
+        collectNamesFromTypeString(inner.slice(start, i), out);
+        start = i + 1;
+      }
+    }
+    collectNamesFromTypeString(inner.slice(start), out);
+    return;
+  }
+  if (!isPrimitiveTypeName(s)) out.push(s);
+}
+
+function collectNamesFromTypeExpr(t: TypeExprNode, out: string[]): void {
+  if (t.isNull) return;
+  if (t.isList && t.inner) { collectNamesFromTypeExpr(t.inner, out); return; }
+  if (t.isTuple && t.tupleElements) {
+    for (const e of t.tupleElements) collectNamesFromTypeExpr(e, out);
+    return;
+  }
+  if (t.path.length > 0) {
+    const s = t.path.join(".");
+    if (!isPrimitiveTypeName(s)) out.push(s);
+  }
+}
+
+function extractTypeRefs(def: TypeDef): string[] {
+  const refs: string[] = [];
+  if (def.kind === "struct" && def.fieldTypeExprs) {
+    for (const t of def.fieldTypeExprs.values()) collectNamesFromTypeExpr(t, refs);
+  }
+  if (def.kind === "tagged_union" && def.variantTypes) {
+    for (const t of def.variantTypes.values()) collectNamesFromTypeString(t, refs);
+  }
+  if (def.kind === "union" && def.memberTypes) {
+    for (const t of def.memberTypes) collectNamesFromTypeString(t, refs);
+  }
+  if (def.kind === "list" && def.elementType) {
+    collectNamesFromTypeString(def.elementType, refs);
+  }
+  return refs;
 }
