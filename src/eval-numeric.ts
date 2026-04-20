@@ -18,7 +18,25 @@ const FLOAT_MAX: Record<string, number> = {
   f16: 65504,
   f32: 3.4028235e+38,
   f64: Number.MAX_VALUE,
+  // f80 and f128 exceed the f64 range, so any f64 value fits
+  f80: Infinity,
+  f128: Infinity,
 };
+
+/**
+ * §5.11.0: Float-to-float narrowing saturates to ±inf when the value exceeds
+ * the target type's finite range — it does NOT throw. Integer-to-float likewise
+ * saturates. Used only on the `to` conversion path; `as` annotations still
+ * report overflow as a runtime error.
+ */
+export function saturateFloat(val: number, typeName: string): number {
+  if (!Number.isFinite(val)) return val;
+  const maxVal = FLOAT_MAX[typeName];
+  if (maxVal === undefined) return val;
+  if (val > maxVal) return Infinity;
+  if (val < -maxVal) return -Infinity;
+  return val;
+}
 
 // ── Validation ──
 

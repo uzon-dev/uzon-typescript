@@ -730,12 +730,14 @@ describe("Enum variant inference in or else (§3.5)", () => {
 });
 
 describe("Numeric conversion overflow checks (§5.11)", () => {
-  it("integer to f16 overflow is rejected", () => {
-    expect(() => evaluate(`result is 70000 to f16`)).toThrow();
+  it("integer to f16 overflow saturates to inf (§5.11.0)", () => {
+    const r = evaluate(`result is 70000 to f16`);
+    expect(r.result).toBe(Infinity);
   });
 
-  it("float to f16 overflow is rejected", () => {
-    expect(() => evaluate(`result is 70000.0 to f16`)).toThrow();
+  it("float to f16 overflow saturates to inf (§5.11.0)", () => {
+    const r = evaluate(`result is 70000.0 to f16`);
+    expect(r.result).toBe(Infinity);
   });
 
   it("integer to f32 within range is valid", () => {

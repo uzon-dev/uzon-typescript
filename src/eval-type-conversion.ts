@@ -15,9 +15,9 @@ import {
   type UzonValue,
 } from "./value.js";
 import { UzonRuntimeError, UzonTypeError } from "./error.js";
-import { validateIntegerType, validateFloatType } from "./eval-numeric.js";
+import { validateIntegerType, saturateFloat } from "./eval-numeric.js";
 import type { EvalContext } from "./eval-context.js";
-import { typeTag, valueToString } from "./eval-helpers.js";
+import { typeTag, typeExprToString, valueToString } from "./eval-helpers.js";
 
 // ── Type conversion (to) ──
 
@@ -26,6 +26,14 @@ export function evalConversion(
   node: { kind: "Conversion"; expr: AstNode; type: TypeExprNode; line: number; col: number },
   scope: Scope, exclude?: string,
 ): UzonValue {
+  // §5.11.0: list/tuple target types are never valid `to` targets — static type error
+  if (node.type.isList || node.type.isTuple) {
+    throw new UzonTypeError(
+      `Cannot convert to '${typeExprToString(node.type)}' — list and tuple are not valid 'to' targets`,
+      node.line, node.col,
+    );
+  }
+
   const val = ctx.evalNode(node.expr, scope, exclude);
   const typePath = node.type.path;
   const typeName = node.type.isNull ? "null" : typePath.join(".");
@@ -134,24 +142,61 @@ function convertString(
   return converted;
 }
 
+// §9 grammar: underscores may appear BETWEEN digits (single underscore, digit on both sides)
+// dec_int = DIGIT , { ( "_" , DIGIT ) | DIGIT }
+const INT_DEC_RE = /^\d(?:_?\d)*$/;
+const INT_HEX_RE = /^0[xX][\da-fA-F](?:_?[\da-fA-F])*$/;
+const INT_OCT_RE = /^0[oO][0-7](?:_?[0-7])*$/;
+const INT_BIN_RE = /^0[bB][01](?:_?[01])*$/;
+// float_num = dec_int "." dec_int [ exp ] | dec_int exp
+const FLOAT_NUM_RE = /^\d(?:_?\d)*(?:\.\d(?:_?\d)*(?:[eE][+-]?\d(?:_?\d)*)?|[eE][+-]?\d(?:_?\d)*)$/;
+
+function isValidIntegerLiteral(s: string): boolean {
+  const body = s.startsWith("-") ? s.slice(1) : s;
+  return INT_DEC_RE.test(body) || INT_HEX_RE.test(body) || INT_OCT_RE.test(body) || INT_BIN_RE.test(body);
+}
+
+function isValidFloatLiteral(s: string): boolean {
+  if (s === "inf" || s === "-inf" || s === "nan" || s === "-nan") return true;
+  const body = s.startsWith("-") ? s.slice(1) : s;
+  if (body === "inf" || body === "nan") return true;
+  return FLOAT_NUM_RE.test(body);
+}
+
 function convertStringToNumeric(
   val: string, typeName: string, node: { line: number; col: number },
 ): UzonValue {
   if (val.length === 0 || val !== val.trim()) {
     throw new UzonRuntimeError(`Cannot convert '${val}' to ${typeName}`, node.line, node.col);
   }
-  const cleaned = val.replace(/_/g, "");
   if (typeName.startsWith("f")) {
+    // §5.11.1: float literal may also be parsed from a dec_int (e.g., "42" to f64)
+    if (!isValidFloatLiteral(val) && !isValidIntegerLiteral(val)) {
+      throw new UzonRuntimeError(`Cannot convert '${val}' to ${typeName}`, node.line, node.col);
+    }
+    const cleaned = val.replace(/_/g, "");
     if (cleaned === "inf") return Infinity;
     if (cleaned === "-inf") return -Infinity;
     if (cleaned === "nan" || cleaned === "-nan") return NaN;
-    const n = Number(cleaned);
+    // Handle base-prefixed integers converted to float
+    let n: number;
+    if (/^-?0[xXoObB]/.test(cleaned)) {
+      const neg = cleaned.startsWith("-");
+      const abs = neg ? cleaned.slice(1) : cleaned;
+      const asInt = BigInt(abs);
+      n = Number(neg ? -asInt : asInt);
+    } else {
+      n = Number(cleaned);
+    }
     if (isNaN(n)) throw new UzonRuntimeError(`Cannot convert '${val}' to ${typeName}`, node.line, node.col);
     if (!Number.isFinite(n)) throw new UzonRuntimeError(`Cannot convert '${val}' to ${typeName}`, node.line, node.col);
-    validateFloatType(n, typeName, node as AstNode);
-    return n;
+    return saturateFloat(n, typeName);
   }
   if (typeName.startsWith("i") || typeName.startsWith("u")) {
+    if (!isValidIntegerLiteral(val)) {
+      throw new UzonRuntimeError(`Cannot convert '${val}' to ${typeName}`, node.line, node.col);
+    }
+    const cleaned = val.replace(/_/g, "");
     let n: bigint;
     try {
       // JS BigInt() doesn't accept negative base-prefixed strings like "-0xff"
@@ -177,8 +222,7 @@ function convertInteger(
     throw new UzonTypeError(`Cannot convert integer to '${typeName}' — only numeric and string targets are permitted`, node.line, node.col);
   }
   if (typeName.startsWith("f")) {
-    const result = Number(val);
-    validateFloatType(result, typeName, node as AstNode);
+    const result = saturateFloat(Number(val), typeName);
     ctx.numericType = typeName;
     return result;
   }
@@ -207,7 +251,7 @@ function convertFloat(
     ctx.numericType = typeName;
     return truncated;
   }
-  validateFloatType(val, typeName, node as AstNode);
+  const result = saturateFloat(val, typeName);
   ctx.numericType = typeName;
-  return val;
+  return result;
 }
