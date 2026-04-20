@@ -135,6 +135,7 @@ export class Lexer {
     if (c === "'") { this.lexQuotedIdentifier(line, col); return; }
     if (c >= "0" && c <= "9") { this.lexNumber(line, col, false); return; }
     if (!this.isWhitespace(c) && !TOKEN_BOUNDARY_CHARS.has(c)) {
+      this.checkBidiMark(c, line, col);
       this.lexIdentifierOrKeyword(line, col);
       return;
     }
@@ -570,6 +571,7 @@ export class Lexer {
       !this.isWhitespace(this.ch()) &&
       !TOKEN_BOUNDARY_CHARS.has(this.ch())
     ) {
+      this.checkBidiMark(this.ch(), this.line, this.col);
       this.advance();
     }
     const word = this.src.slice(start, this.pos);
@@ -586,6 +588,7 @@ export class Lexer {
       !this.isWhitespace(this.ch()) &&
       !TOKEN_BOUNDARY_CHARS.has(this.ch())
     ) {
+      this.checkBidiMark(this.ch(), this.line, this.col);
       word += this.advance();
     }
     return word;
@@ -725,5 +728,20 @@ export class Lexer {
 
   private isWhitespaceOrBoundary(c: string): boolean {
     return this.isWhitespace(c) || TOKEN_BOUNDARY_CHARS.has(c);
+  }
+
+  /** §2.3: RTL/bidi marks are syntax errors outside string literals. */
+  private checkBidiMark(c: string, line: number, col: number): void {
+    const code = c.charCodeAt(0);
+    if (
+      code === 0x200E || code === 0x200F ||
+      (code >= 0x202A && code <= 0x202E) ||
+      (code >= 0x2066 && code <= 0x2069)
+    ) {
+      this.error(
+        `RTL/bidi mark (U+${code.toString(16).toUpperCase().padStart(4, "0")}) is not allowed outside string literals`,
+        line, col,
+      );
+    }
   }
 }

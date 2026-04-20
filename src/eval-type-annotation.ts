@@ -112,6 +112,14 @@ export function evalTypeAnnotation(
     );
   }
 
+  // §6.1 (R6): `null as (T1, T2)` — null is not a tuple value.
+  if (node.type.isTuple && val === null) {
+    throw new UzonTypeError(
+      `Cannot annotate null as tuple type`,
+      node.line, node.col,
+    );
+  }
+
   // §3.4/§6.1: List type annotation
   if (node.type.isList && node.type.inner && Array.isArray(val)) {
     return annotateListType(ctx, val, node.type.inner, scope, node as AstNode);
@@ -578,6 +586,8 @@ function valueMatchesMemberType(val: UzonValue, memberType: string): boolean {
   if (typeof val === "number") return /^f\d+$/.test(memberType);
   if (typeof val === "boolean") return memberType === "bool";
   if (typeof val === "string") return memberType === "string";
+  if (val instanceof UzonEnum) return val.typeName === memberType;
+  if (val instanceof UzonTaggedUnion) return val.typeName === memberType;
   if (val instanceof UzonTuple) {
     if (!memberType.startsWith("(") || !memberType.endsWith(")")) return false;
     const elemTypes = splitTypeList(memberType.slice(1, -1));

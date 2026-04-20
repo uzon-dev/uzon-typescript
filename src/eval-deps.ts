@@ -7,7 +7,7 @@
  * Used by the evaluator to determine binding evaluation order (§3.1).
  */
 
-import type { AstNode, BindingNode } from "./ast.js";
+import type { AstNode, BindingNode, TypeExprNode } from "./ast.js";
 
 /** Result of topological sort: non-cycle bindings in order, plus cycle participant names. */
 export interface TopoResult {
@@ -20,6 +20,21 @@ export function collectDeps(node: AstNode, scopeNames: Set<string>): Set<string>
   const deps = new Set<string>();
   walkDeps(node, deps, scopeNames);
   return deps;
+}
+
+/**
+ * Record binding dependencies referenced by a type expression's path roots.
+ * For `as Foo.Bar`, the root `Foo` may be a binding (e.g., a `struct "..."`
+ * import), so the enclosing binding depends on it being evaluated first.
+ */
+function walkTypeDeps(type: TypeExprNode, deps: Set<string>, scopeNames: Set<string>): void {
+  if (type.path.length > 0 && scopeNames.has(type.path[0])) {
+    deps.add(type.path[0]);
+  }
+  if (type.inner) walkTypeDeps(type.inner, deps, scopeNames);
+  if (type.tupleElements) {
+    for (const el of type.tupleElements) walkTypeDeps(el, deps, scopeNames);
+  }
 }
 
 /** Recursively walk AST nodes collecting dependency names. */
@@ -54,9 +69,11 @@ function walkDeps(node: AstNode, deps: Set<string>, scopeNames: Set<string>): vo
       break;
     case "TypeAnnotation":
       walkDeps(node.expr, deps, scopeNames);
+      walkTypeDeps(node.type, deps, scopeNames);
       break;
     case "Conversion":
       walkDeps(node.expr, deps, scopeNames);
+      walkTypeDeps(node.type, deps, scopeNames);
       break;
     case "StructOverride":
       walkDeps(node.base, deps, scopeNames);

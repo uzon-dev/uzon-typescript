@@ -559,6 +559,29 @@ export class Evaluator implements EvalContext {
             node.line, node.col,
           );
         }
+        // §3.5 L866: union-of-enums context — search member enums for a
+        // matching variant. Multiple matches → ambiguity syntax error.
+        if (typeDef.kind === "union" && typeDef.memberTypes) {
+          const matches: TypeDef[] = [];
+          for (const mt of typeDef.memberTypes) {
+            const memberDef = scope.getType([mt]);
+            if (memberDef && memberDef.kind === "enum" && memberDef.variants?.includes(name)) {
+              matches.push(memberDef);
+            }
+          }
+          if (matches.length > 1) {
+            const suggestions = matches.map(m => `'${name} as ${m.name}'`).join(" or ");
+            throw new UzonSyntaxError(
+              `Ambiguous variant '${name}' — matches ${matches.map(m => `${m.name}.${name}`).join(" and ")}; use ${suggestions} to disambiguate`,
+              node.line, node.col,
+            );
+          }
+          if (matches.length === 1) {
+            const enumDef = matches[0];
+            const inner = new UzonEnum(name, enumDef.variants!, enumDef.name);
+            return new UzonUnion(inner, typeDef.memberTypes, typeDef.name);
+          }
+        }
       }
     }
 
