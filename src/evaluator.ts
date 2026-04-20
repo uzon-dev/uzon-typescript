@@ -507,14 +507,20 @@ export class Evaluator implements EvalContext {
     // List with element type context
     if (typeExpr.isList && typeExpr.inner && node.kind === "ListLiteral") {
       const elements: UzonValue[] = [];
+      const innerTypeName = typeExpr.inner.path.join(".");
+      const innerIsFloat = /^f\d+$/.test(innerTypeName);
       for (const elem of node.elements) {
-        const v = this.evalInContext(elem, typeExpr.inner, scope, exclude);
+        let v = this.evalInContext(elem, typeExpr.inner, scope, exclude);
         if (v === UZON_UNDEFINED) {
           throw new UzonRuntimeError(`List element resolved to undefined`, elem.line, elem.col);
         }
+        // §3.4: Integer-to-float promotion applies within annotated float lists
+        if (innerIsFloat && typeof v === "bigint" && isAdoptable(this.numericType)) {
+          v = Number(v);
+        }
         elements.push(v);
       }
-      this.listElementTypes.set(elements, typeExpr.inner.path.join("."));
+      this.listElementTypes.set(elements, innerTypeName);
       return elements;
     }
 
@@ -1100,13 +1106,20 @@ export class Evaluator implements EvalContext {
     node: { kind: "ListLiteral"; elements: AstNode[]; line: number; col: number },
     scope: Scope, exclude?: string,
   ): UzonValue {
-    const result = node.elements.map((e, i) => {
+    const result: UzonValue[] = [];
+    const elemNumTypes: (string | null)[] = [];
+    for (let i = 0; i < node.elements.length; i++) {
+      const e = node.elements[i];
       const val = this.evalNode(e, scope, exclude);
       if (val === UZON_UNDEFINED) {
         throw new UzonRuntimeError(`List element ${i} resolved to undefined`, e.line, e.col);
       }
-      return val;
-    });
+      result.push(val);
+      elemNumTypes.push(this.numericType);
+    }
+    // §3.4: Integer-to-float promotion within a list — if any element is float
+    // and all integer elements are adoptable, promote integers to the float type.
+    this.applyListNumericPromotion(result, elemNumTypes, node);
     // §3.4: All elements must be the same type; null is compatible with any type
     if (result.length > 1) {
       const inferredCat = listElementCategory(result);
@@ -1128,6 +1141,71 @@ export class Evaluator implements EvalContext {
       }
     }
     return result;
+  }
+
+  /**
+   * §3.4: Apply numeric promotion and mixed-type detection across list elements.
+   *   - Multiple distinct concrete numeric types → type error (e.g., [1 as i32, 2 as i64]).
+   *   - Concrete type present: adoptable elements validated/promoted to match it.
+   *   - All adoptable: integer + float mix promotes integers to the float default.
+   *
+   * Mutates `result` in place (replacing bigint with number on promotion) and
+   * records the final element type via listElementTypes.
+   */
+  private applyListNumericPromotion(
+    result: UzonValue[], elemNumTypes: (string | null)[],
+    node: { elements: AstNode[]; line: number; col: number },
+  ): void {
+    // Build indexed numeric-only entries for easier reasoning
+    const numericIdx: number[] = [];
+    for (let i = 0; i < result.length; i++) {
+      const v = result[i];
+      if (typeof v === "bigint" || typeof v === "number") numericIdx.push(i);
+    }
+    if (numericIdx.length === 0) return;
+    const concreteTypes = new Set<string>();
+    let anyFloatAdoptable = false;
+    for (const i of numericIdx) {
+      const raw = elemNumTypes[i];
+      if (raw === null) continue;
+      if (isAdoptable(raw)) {
+        if (/^f\d+$/.test(actualType(raw)!)) anyFloatAdoptable = true;
+      } else {
+        concreteTypes.add(raw);
+      }
+    }
+    if (concreteTypes.size > 1) {
+      const types = [...concreteTypes].sort();
+      throw new UzonTypeError(
+        `List mixes typed values of different numeric types (${types.join(", ")}) — elements must have the same type`,
+        node.line, node.col,
+      );
+    }
+    let target: string | null = null;
+    if (concreteTypes.size === 1) {
+      target = [...concreteTypes][0];
+    } else if (anyFloatAdoptable) {
+      target = "f64";
+    } else {
+      target = null;
+    }
+    if (target && /^f\d+$/.test(target)) {
+      for (const i of numericIdx) {
+        if (typeof result[i] === "bigint") {
+          const raw = elemNumTypes[i];
+          if (raw && !isAdoptable(raw)) {
+            throw new UzonTypeError(
+              `List element ${i} has type ${actualType(raw)} but list expects ${target} — use 'to ${target}' to convert explicitly`,
+              node.elements[i].line, node.elements[i].col,
+            );
+          }
+          result[i] = Number(result[i] as bigint);
+        }
+      }
+      this.listElementTypes.set(result, target);
+    } else if (target) {
+      this.listElementTypes.set(result, target);
+    }
   }
 
   private validateListStructHomogeneity(
