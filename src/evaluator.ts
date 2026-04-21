@@ -241,6 +241,18 @@ export class Evaluator implements EvalContext {
           hadErrors = true;
           continue;
         }
+        // §3.4: if/case producing an empty list with no inferable element type
+        // from any branch is invalid without an outer `as [T]` annotation.
+        if ((b.value.kind === "IfExpr" || b.value.kind === "CaseExpr")
+            && Array.isArray(val) && val.length === 0
+            && !this.listElementTypes.has(val)) {
+          this.collectedErrors.push(new UzonTypeError(
+            "Empty list requires a type annotation — no branch supplies an element type; use '(expr) as [Type]'",
+            b.value.line, b.value.col,
+          ));
+          hadErrors = true;
+          continue;
+        }
         if (b.value.kind === "ListLiteral" && Array.isArray(val)
             && val.length > 0 && val.every(e => e === null)) {
           this.collectedErrors.push(new UzonTypeError(

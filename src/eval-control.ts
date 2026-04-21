@@ -16,7 +16,7 @@ import {
 import { UzonRuntimeError, UzonTypeError } from "./error.js";
 import { isAdoptable } from "./eval-numeric.js";
 import type { EvalContext } from "./eval-context.js";
-import { assertSameType, valuesEqual, unwrapValue, assertBool } from "./eval-helpers.js";
+import { assertSameType, valuesEqual, unwrapValue, assertBool, typeTag } from "./eval-helpers.js";
 
 // ── Cross-category adoption helper ──
 
@@ -116,7 +116,8 @@ export function evalIf(
     }
     // §3.4: empty list type inference from other branch
     if (Array.isArray(taken) && taken.length === 0 && Array.isArray(other) && other.length > 0) {
-      const otherElemType = ctx.listElementTypes.get(other);
+      const otherElemType = ctx.listElementTypes.get(other)
+        ?? (other[0] !== null && other[0] !== undefined ? typeTag(other[0]) : null);
       if (otherElemType) ctx.listElementTypes.set(taken, otherElemType);
     }
   } catch (e) {
@@ -512,7 +513,8 @@ function assertBranchTypes(
         assertBranchTypeCompat(ctx, result, resultNumType, branchResult, ctx.numericType, node as unknown as AstNode);
       }
       if (Array.isArray(result) && result.length === 0 && Array.isArray(branchResult) && branchResult.length > 0) {
-        const otherElemType = ctx.listElementTypes.get(branchResult);
+        const otherElemType = ctx.listElementTypes.get(branchResult)
+          ?? (branchResult[0] !== null && branchResult[0] !== undefined ? typeTag(branchResult[0]) : null);
         if (otherElemType) ctx.listElementTypes.set(result, otherElemType);
       }
     } catch (e) {
@@ -527,7 +529,8 @@ function assertBranchTypes(
         assertBranchTypeCompat(ctx, result, resultNumType, elseResult, ctx.numericType, node as unknown as AstNode);
       }
       if (Array.isArray(result) && result.length === 0 && Array.isArray(elseResult) && elseResult.length > 0) {
-        const otherElemType = ctx.listElementTypes.get(elseResult);
+        const otherElemType = ctx.listElementTypes.get(elseResult)
+          ?? (elseResult[0] !== null && elseResult[0] !== undefined ? typeTag(elseResult[0]) : null);
         if (otherElemType) ctx.listElementTypes.set(result, otherElemType);
       }
     } catch (e) {
