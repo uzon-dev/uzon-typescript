@@ -1,6 +1,6 @@
 # uzon
 
-TypeScript/JavaScript implementation of [UZON](https://github.com/uzon-dev) — a typed, human-readable data expression format.
+TypeScript/JavaScript implementation of [UZON](https://github.com/uzon-dev) — a typed configuration language.
 
 ```
 npm install @uzon/uzon

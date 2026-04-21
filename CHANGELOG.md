@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.1 (2026-04-21)
+
+### Docs
+
+- Describe UZON as "a typed configuration language" in the README.
+
 ## 0.10.0 (2026-04-20)
 
 Align implementation with UZON specification v0.10.
