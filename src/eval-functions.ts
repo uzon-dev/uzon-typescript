@@ -59,8 +59,11 @@ export function evalFunctionExpr(
   const paramNames = node.params.map(p => p.name);
   const paramTypes = node.params.map(p => typeExprToString(p.type));
   const paramTypeExprs = node.params.map(p => p.type);
+  // §3.5 rule 4: the default expression is evaluated with the parameter's
+  // declared type as context so bare variant names resolve to the enum,
+  // struct literals adopt field defaults, etc.
   const defaultValues: (UzonValue | null)[] = node.params.map(p =>
-    p.defaultValue ? ctx.evalNode(p.defaultValue, scope, exclude) : null,
+    p.defaultValue ? ctx.evalInContext(p.defaultValue, p.type, scope, exclude) : null,
   );
   const returnType = typeExprToString(node.returnType);
 
