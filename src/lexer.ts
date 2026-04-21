@@ -124,6 +124,14 @@ export class Lexer {
     const line = this.line;
     const col = this.col;
 
+    // §2.1: mid-file BOM (U+FEFF) outside strings and comments is a syntax error.
+    if (c === "\uFEFF") {
+      this.error(
+        "Mid-file BOM (U+FEFF) is not allowed outside string literals or comments",
+        line, col,
+      );
+    }
+
     if (this.tryLexNewline(c, line, col)) return;
     if (this.tryLexInterpolationString(c, line, col)) return;
     if (this.tryLexStringStart(c, line, col)) return;
@@ -740,6 +748,12 @@ export class Lexer {
     ) {
       this.error(
         `RTL/bidi mark (U+${code.toString(16).toUpperCase().padStart(4, "0")}) is not allowed outside string literals`,
+        line, col,
+      );
+    }
+    if (code === 0xFEFF) {
+      this.error(
+        "Mid-file BOM (U+FEFF) is not allowed outside string literals or comments",
         line, col,
       );
     }
