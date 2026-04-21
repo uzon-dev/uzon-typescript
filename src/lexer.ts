@@ -396,9 +396,9 @@ export class Lexer {
         this.error("Unterminated string literal");
       }
 
-      // §4.4: reject control characters U+0000–U+001F
+      // §4.4: reject control characters U+0000–U+001F and U+007F
       const code = c.charCodeAt(0);
-      if (code <= 0x1f) {
+      if (code <= 0x1f || code === 0x7f) {
         this.error(
           `Control character U+${code.toString(16).padStart(4, "0").toUpperCase()} is not allowed in strings — use an escape sequence`,
         );
