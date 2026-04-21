@@ -324,18 +324,33 @@ function stdTrim(args: UzonValue[], node: AstNode): UzonValue {
   return val.trim();
 }
 
+// §5.16.6: Unicode simple (default) case folding — locale-independent,
+// codepoint-by-codepoint one-to-one mapping only. Characters whose full
+// folding produces multiple codepoints (e.g., `ß` → `SS`) are returned
+// unchanged. Iterates by codepoint so surrogate pairs map as a unit.
+function simpleCaseFold(s: string, to: "lower" | "upper"): string {
+  let out = "";
+  for (const ch of s) {
+    const mapped = to === "lower" ? ch.toLowerCase() : ch.toUpperCase();
+    let n = 0;
+    for (const _ of mapped) { n++; if (n > 1) break; }
+    out += n === 1 ? mapped : ch;
+  }
+  return out;
+}
+
 function stdLower(args: UzonValue[], node: AstNode): UzonValue {
   expectArgs(args, 1, "lower", node);
   const val = args[0];
   if (typeof val !== "string") throw new UzonTypeError("std.lower requires a string argument", node.line, node.col);
-  return val.toLowerCase();
+  return simpleCaseFold(val, "lower");
 }
 
 function stdUpper(args: UzonValue[], node: AstNode): UzonValue {
   expectArgs(args, 1, "upper", node);
   const val = args[0];
   if (typeof val !== "string") throw new UzonTypeError("std.upper requires a string argument", node.line, node.col);
-  return val.toUpperCase();
+  return simpleCaseFold(val, "upper");
 }
 
 // ── Reverse ──
